@@ -1,0 +1,30 @@
+{
+  "name": "Remix: Dashboard-Dost Data Analytics Dashboard",
+  "short_name": "Dashboard-Dost",
+  "description": "An interactive analytics dashboard builder featuring robust geographic insights, dynamic filtering, local-first state persistence, and conversational data visualization.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0A0A0F",
+  "theme_color": "#0A0A0F",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

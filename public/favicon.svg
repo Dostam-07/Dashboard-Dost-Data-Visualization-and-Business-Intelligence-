@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#0A0A0F" />
+  <g transform="translate(112, 112)">
+    <!-- Concentric glow circles -->
+    <circle cx="144" cy="144" r="140" stroke="url(#gradient)" stroke-width="8" fill="none" opacity="0.15" />
+    <circle cx="144" cy="144" r="110" stroke="url(#gradient)" stroke-width="12" fill="none" opacity="0.4" />
+    <!-- Pulse glowing center logo -->
+    <circle cx="144" cy="144" r="80" fill="url(#gradient)" />
+    <!-- White inner pulsing nested ring -->
+    <circle cx="144" cy="144" r="36" stroke="#ffffff" stroke-width="10" fill="none" />
+    <circle cx="144" cy="144" r="10" fill="#ffffff" />
+  </g>
+</svg>
