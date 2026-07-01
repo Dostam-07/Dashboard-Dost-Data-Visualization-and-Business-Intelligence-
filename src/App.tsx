@@ -3635,7 +3635,7 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-800 dark:text-zinc-100 text-sm tracking-tight uppercase">AI executive insights</h3>
-                  <p className="text-[10px] text-slate-400 font-mono">Powered by Gemini 3.5 Flash</p>
+                  <p className="text-[10px] text-slate-400 font-mono">Powered by Gemini Flash</p>
                 </div>
               </div>
               <button

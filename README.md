@@ -1,138 +1,412 @@
 # ⚡ Dash-Dost: Conversational Analytics & Interactive Dashboard Builder
 
-> **Your Raw Data, Transformed Conversonally.** Turn messy, chaotic CSVs and Excel files into professional, interactive, and beautifully composed dashboards in seconds. Powered by Google Gemini and a robust client-side fuzzy data binding engine.
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/dostam/dash-dost)
+[![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=flat&logo=vite&logoColor=white)](https://vite.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Google Gemini API](https://img.shields.io/badge/Google_Gemini-8E75C2?style=flat&logo=google-gemini&logoColor=white)](https://ai.google.dev/)
+[![Puppeteer](https://img.shields.io/badge/puppeteer-%2304d414.svg?style=flat&logo=puppeteer&logoColor=white)](https://pptr.dev/)
+
+> **Your Raw Data, Transformed Conversationally.** Turn messy, chaotic CSVs, Excel sheets, and static live dashboards into professional, highly interactive, and beautifully composed visual workspaces in seconds. Powered by Google Gemini and a robust client-side fuzzy data-binding engine.
 
 ---
 
 ## 🌟 Overview
 
-**Dash-Dost** (Dashboard Friend) is a modern, full-stack analytics workspace that breaks down the barrier between complex data files and business intelligence. Instead of constructing tedious pivot tables or dealing with rigid dashboard layouts, users simply talk to their data. 
+**Dash-Dost** (Dashboard Friend) is a modern, full-stack conversational analytics workspace that breaks down the barrier between raw data and business intelligence. Instead of constructing tedious pivot tables, writing complex SQL queries, or dealing with rigid layouts, you simply talk to your data.
 
-Dash-Dost handles the entire pipeline: profile columns, map complex headers to clean visualizations, generate responsive layout configurations, and support interactive queries. Whether you need a fully custom AI-generated layout or an instant zero-LLM **Quick View**, Dash-Dost is the ultimate conversational companion for your datasets.
-
----
-
-## 🎨 Visual Identity & Interface Tour
-
-The application utilizes a premium **Cosmic Dark Slate** theme styled using **Tailwind CSS**. It incorporates generous negative space, sleek borders, high-contrast visual cues, and beautiful motion-based layout transitions.
-
-### 1. Conversational Board Synthesis
-Describe what you want to visualize in plain English (e.g., *"Show me total sales as a KPI, a line chart of sales over time, and a bar chart comparing performance across categories"*). The workspace transforms your description into fully-bound, interactive Recharts widgets.
-
-### 2. "Quick View" Mode (No AI Latency)
-When you upload a file and need instant gratification, click the **⚡ Quick View** button. Dash-Dost bypasses the network entirely, running a local profiling heuristic (`simpleDashboardBuilder.ts`) that maps numerical, categorical, and chronological columns directly to a complete dashboard layout in **under 100 milliseconds**.
-
-### 3. Voice-Capable Analyst View (`AnalystView`)
-A virtual data scientist sits in your sidebar. Ask questions, dive deep into specific trends, calculate averages, or find outliers. Toggle the **Microphone** to dictate queries aloud via browser speech recognition, receiving detailed, annotated source references for every response.
-
-### 4. Interactive Slicing & Custom Filtering
-Add filters on-the-fly. Filter dashboards by region, category, or timeframe. When a filter narrows data to zero matches, Dash-Dost elegantly handles empty states, letting you clear or pivot constraints immediately.
+Dash-Dost handles the entire analytics lifecycle: it profiles dataset columns, normalizes messy values, matches fuzzy queries to actual dataset headers, generates responsive bento-grid layouts, and supports conversational deep dives with a grounded virtual analyst. If you need immediate results without AI latency, the **⚡ Quick View** engine bypasses the network entirely, mapping numerical, categorical, and chronological metrics into interactive charts in **under 100 milliseconds**.
 
 ---
 
-## 🚀 Key Features & Architectural Improvements
+## 📖 Table of Contents
 
-Our latest version includes 9 critical stability fixes across layout, binding, and rendering pipelines:
-
-*   **Intelligent Fuzzy Data Binder**: Standardizes loose column references from LLMs (e.g., `"revenue"`, `"sales"`) to raw, custom, or complex headers (e.g., `"Net Revenue (USD)"`). Includes robust fallback triggers to automatically infer column types if matching fails.
-*   **KPI Guardrails & Safe Aggregations**: KPI cards automatically lower calculation thresholds to handle messy data (like `$`, `%`, or missing rows). Falls back gracefully to total row counts under the label *"Total Records"* rather than failing.
-*   **High-Cardinality Chart Clamping**: Prevents pie charts from rendering unreadable slices by automatically sorting values descending and grouping low-frequency items into an *"Other"* bucket (capped at the top 8 slices).
-*   **SVG Isolation & Rendering Quality**: Eliminated gradient ID overlap and color bleeding inside multi-chart viewports by prefixing unique `component.id` identifiers onto linear gradients.
-*   **In-Situ Component Editor**: Adjust titles, descriptions, toggle legends, switch chart types (e.g., from Bar to Area), project mathematical trendlines, or highlight structural anomalies with a clean visual overlay.
+- [⚡ Dash-Dost: Conversational Analytics \& Interactive Dashboard Builder](#-dash-dost-conversational-analytics--interactive-dashboard-builder)
+  - [🌟 Overview](#-overview)
+  - [📖 Table of Contents](#-table-of-contents)
+  - [✨ Key Features](#-key-features)
+  - [🏗️ System Architecture \& Data Flow](#️-system-architecture--data-flow)
+  - [🛠️ Tech Stack \& Dependencies](#️-tech-stack--dependencies)
+  - [📂 Project Structure](#-project-structure)
+  - [🚀 Getting Started](#-getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation \& Configuration](#installation--configuration)
+    - [Environment Variables](#environment-variables)
+    - [Running the Development Server](#running-the-development-server)
+    - [Production Build \& Execution](#production-build--execution)
+    - [Available Scripts](#available-scripts)
+  - [🔌 API Reference](#-api-reference)
+  - [🧠 AI \& LLM Architecture](#-ai--llm-architecture)
+    - [Tiered Grounding Hierarchy](#tiered-grounding-hierarchy)
+    - [Multi-Intent Segmentation Rule](#multi-intent-segmentation-rule)
+    - [Inline Ephemeral Chart Spec Generation](#inline-ephemeral-chart-spec-generation)
+  - [📸 UI Tour / Placeholders](#-ui-tour--placeholders)
+  - [🧪 Code Quality \& Validation](#-code-quality--validation)
+  - [🤝 Contributing](#-contributing)
+  - [📜 License](#-license)
+  - [💖 Acknowledgements](#-acknowledgements)
 
 ---
 
-## 🛠️ Tech Stack & Key Modules
+## ✨ Key Features
 
-*   **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, `motion/react` for animations.
-*   **Data Visualization**: Recharts (Area, Bar, Line, Scatter, Pie, Composites) + Custom Geography Mapping.
-*   **Backend Server**: Express (TypeScript/TSX execution), esbuild server-side compiler.
-*   **AI Engine**: `@google/genai` TypeScript SDK proxying requests to Gemini model utilities with high-fidelity system instructions.
+*   **💬 Conversational Dashboard Synthesis**: Describe what you want to visualize in plain English (e.g., *"Show me total revenue as a KPI, a line chart of sales over time, and a bar chart of regions"*). Dash-Dost generates beautiful layouts containing bound, responsive Recharts widgets.
+*   **⚡ Zero-LLM "Quick View" Mode**: Skip AI roundtrips. A powerful client-side heuristic engine analyzes data shapes, categories, and numerical metrics to build a comprehensive, ready-to-use dashboard in milliseconds.
+*   **🧩 High-Fidelity Multi-Intent Q&A**: Enter compound questions like *"What's our Q3 revenue? Also compare region A vs B, and why did churn drop?"* The virtual analyst segments these into independent queries, returning a tailored, multi-card answer layout with distinct sources and KPIs.
+*   **📊 Inline Chat-Only Ephemeral Charts**: Sub-answers with comparative or trend-based metrics automatically generate line, bar, area, or pie charts rendered *inside the chat bubble*. These charts are ephemeral and do not clutter your live dashboard until you click **"📊 Show as Chart"** or promote them.
+*   **🕷️ Browser-Based Deep Dashboard Crawler**: Input any public or authenticated dashboard URL. Dash-Dost spins up a server-side headless browser (Puppeteer) to crawl through up to 15 tabs and sub-pages, bypass loading states, scroll dynamically to trigger charts, and aggregate text and visual intelligence.
+*   **🖼️ Screenshot Intelligence OCR**: Drop a visual capture of any existing dashboard or spreadsheet. The system extracts tabular data, coordinates UI widgets, identifies trends, and produces a highly accurate visual markdown dossier.
+*   **🔗 Intelligent Fuzzy Data Binder**: Standardizes loose column references from LLM payloads (e.g., `"revenue"`, `"sales"`) against actual, complex spreadsheet columns (e.g., `"Net Revenue (USD)"` or `"Sales_Q2_Final"`), using fuzzy matching and semantic mapping.
+*   **🛡️ KPI Guardrails \& Safe Aggregations**: KPI cards automatically handle noisy string formatted values (like `$`, `%`, commas, or missing cells). If no numeric aggregation is possible, cards fall back to standard counts or row counts gracefully.
+*   **🍰 High-Cardinality Pie Chart Clamping**: Protects pie charts from rendering unreadable, micro-sized slices. It automatically ranks values and groups lower-frequency entries into an *"Other"* category once slices exceed 8.
+
+---
+
+## 🏗️ System Architecture & Data Flow
+
+Dash-Dost is architected as a full-stack Node.js and React application with custom browser scraping and AI reasoning capabilities.
+
+```mermaid
+graph TD
+    User([User])
+    
+    %% Frontend Group
+    subgraph Frontend [React Client-Side]
+        App[App.tsx / Global State]
+        Analyst[AnalystView.tsx / Chat Sidebar]
+        Dashboard[ChartWrapper.tsx / Bento Layout]
+        QuickView[simpleDashboardBuilder.ts / Local Heuristics]
+    end
+    
+    %% Backend Group
+    subgraph Backend [Express Server-Side]
+        Server[server.ts]
+        Crawler[DashboardCrawlerService.ts / Headless Puppeteer]
+        Gemini[Google @google/genai SDK]
+    end
+    
+    %% External Services Group
+    subgraph Externals [External Systems]
+        LLM[Google Gemini Models]
+        RemoteDash[Target Remote URL]
+    end
+
+    %% Interactions
+    User -->|Upload CSV/XLSX| App
+    User -->|Asks Complex Questions| Analyst
+    User -->|Clicks Quick View| QuickView
+    
+    QuickView -->|Instant Layout Specs| Dashboard
+    App -->|Sends Raw Data & Prompt| Server
+    Analyst -->|Sends Chat & History| Server
+    
+    Server -->|Direct Request| Gemini
+    Crawler -->|Navigates, clicks, scrolls tabs| RemoteDash
+    RemoteDash -->|Rendered Content / Text / Images| Crawler
+    
+    Crawler -->|Scraped Knowledge Base & Snapshot| Server
+    Gemini -->|Prompt + Context Specs| LLM
+    LLM -->|Structured JSON Response| Gemini
+    
+    Gemini -->|Segmented Answers & Chart Specs| Analyst
+    Server -->|Layout Payloads & Binding Configs| App
+    
+    Dashboard -->|Binds Data to Recharts| App
+```
+
+---
+
+## 🛠️ Tech Stack & Dependencies
+
+*   **Core Framework**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite 6](https://vite.dev/)
+*   **Styling \& Layout**: [Tailwind CSS v4](https://tailwindcss.com/) with a bespoke **Cosmic Dark Slate** color scheme, [Motion](https://motion.dev/) for smooth animations, and `@dnd-kit` for interactive layout sorting.
+*   **Visualization Engine**: [Recharts](https://recharts.org/) (Line, Bar, Area, Pie, Scatter, Maps) with gradient prefix isolation to prevent multi-chart rendering collisions.
+*   **Server Architecture**: [Express 4](https://expressjs.com/) configured with standard Node.js server-side TypeScript execution via `tsx` and bundled using `esbuild`.
+*   **AI Integration**: [@google/genai SDK v2.4.0](https://www.npmjs.com/package/@google/genai) utilizing `gemini-flash-latest` (Gemini Flash) models.
+*   **Headless Crawling**: [Puppeteer](https://pptr.dev/) with viewport scrolling, dynamic tab clicking heuristics, and screenshot extraction pipelines.
+*   **Local Caching**: `IndexedDB` handled via `idb-keyval` for persistent caching of processed datasets and generated layouts.
+*   **Data Processors**: `PapaParse` for rapid CSV processing, and `XLSX` (SheetJS) for Excel reading.
 
 ---
 
 ## 📂 Project Structure
 
-```
-├── /server.ts              # Full-stack Express server; handles Gemini proxying, prompts, and server-static serving
+```text
+├── server.ts                       # Full-stack Express server (Gemini API, OCR, Puppeteer scrapers, and router)
+├── package.json                    # Dependencies, scripts, and build tasks
+├── metadata.json                   # Applet permissions, metadata, and cloud capability tags
+├── tsconfig.json                   # TypeScript configuration
+├── vite.config.ts                  # Vite compilation, aliases, and Tailwind integration
+├── .env.example                    # Environment variable configurations
+│
 ├── /src
-│   ├── /components
-│   │   ├── AnalystView.tsx            # Floating conversational analyst side-drawer with voice support
-│   │   ├── ChartWrapper.tsx           # Multi-type Recharts wrapper (KPI, Line, Bar, Pie, Scatter, Maps)
-│   │   ├── CompareTrendsPanel.tsx     # Handles dual-dataset side-by-side comparison overlays
-│   │   ├── ConversationalPanel.tsx    # Multi-tab conversation stream and dashboard prompt center
-│   │   ├── EditComponentModal.tsx     # Graphic UI to customize chart properties dynamically
-│   │   └── SavedDashboardsManager.tsx # Local Storage persistent dashboard browser
-│   ├── /utils
-│   │   ├── dataBinder.ts              # Semantic schema matcher, reducer, aggregator, and evaluator
-│   │   └── simpleDashboardBuilder.ts  # Zero-LLM instant client-side dashboard schema generator
-│   ├── App.tsx                        # Main application runtime, file drag-and-drop, routing, layout grid
-│   ├── index.css                      # Tailwind entrypoint with Cosmic Dark variables
-│   └── types.ts                       # Standard TypeScript type declarations (Payloads, Charts, Schemas)
-├── metadata.json           # Application descriptor and configuration manifest
-└── package.json            # Deployment tasks, Node scripts, and production dependencies
+│   ├── main.tsx                    # Client-side entrypoint
+│   ├── App.tsx                     # Main application layout, file drop-zone, and dashboard render grid
+│   ├── index.css                   # Global Tailwind CSS entrypoint with custom Cosmic Dark variables
+│   ├── types.ts                    # Consolidated TypeScript interfaces (Charts, Payloads, QA schemas)
+│   ├── store.ts                    # Global UI state store (Zustand)
+│   │
+│   ├── /components                 # Visual components and modals
+│   │   ├── AnalystView.tsx         # Floating conversational Analyst side-drawer with voice capabilities
+│   │   ├── ChartWrapper.tsx        # Dynamic Recharts engine (KPI, Line, Bar, Pie, Scatter, Maps)
+│   │   ├── CompareTrendsPanel.tsx  # Interactive side-by-side dataset overlay and comparison controller
+│   │   ├── ConversationalPanel.tsx # Conversation streams, prompt centers, and historical managers
+│   │   ├── DashboardSkeleton.tsx  # Smooth animated layout loaders
+│   │   ├── EditComponentModal.tsx  # In-situ editor to modify widget type, math overlays, and titles
+│   │   ├── EditFilterModal.tsx     # Custom categorical slicing and filter customizer
+│   │   ├── FiltersPanel.tsx        # Persistent dashboard active filter controls
+│   │   ├── GeographyMap.tsx        # React-Simple-Maps renderer for geographic metadata binding
+│   │   ├── InlineChatChart.tsx     # Compact, read-only Recharts widget specifically designed for chat bubbles
+│   │   ├── SavedDashboardsManager.tsx # Persistent IndexedDB dashboard manager
+│   │   └── SuggestionChips.tsx     # Context-aware conversational starter chips
+│   │
+│   ├── /services                   # Full-stack service integrations
+│   │   └── DashboardCrawlerService.ts # Puppeteer-based recursive tab and iframe web scraper
+│   │
+│   ├── /utils                      # Pure utility functions and mathematical engines
+│   │   ├── anomalyDetector.ts      # Statistical anomaly flags and outlier highlights
+│   │   ├── calculatedFields.ts     # Client-side data derivation helper
+│   │   ├── dataBinder.ts           # Semantic column binder, aggregations, and fuzzy matcher
+│   │   ├── dataNormalization.ts    # String and currency cleaner
+│   │   ├── dataProfiler.ts         # Fast data cardinality, types, and summary generator
+│   │   ├── filterEngine.ts         # Multiprocessor categorical data subset mapper
+│   │   ├── jsonRepair.ts           # Recursive regex-based LLM JSON string bracket repair tool
+│   │   ├── queryEngine.ts          # In-memory natural query dataset parser
+│   │   ├── schemaValidation.ts     # Validation safeguards for LLM output structures
+│   │   └── simpleDashboardBuilder.ts # Client-side quick-dashboard template generator
+│
+└── /public                         # Static files and fallback assets
 ```
 
 ---
 
-## ⚙️ Installation & Configuration
+## 🚀 Getting Started
 
-### 1. Set Up Environment Variables
-Create a `.env` file in the root directory (using `.env.example` as a template):
-```env
-GEMINI_API_KEY="your_gemini_api_key_here"
-```
+### Prerequisites
 
-### 2. Install Dependencies
+*   [Node.js](https://nodejs.org/) v18.0.0 or higher
+*   A Google AI Studio [Gemini API Key](https://aistudio.google.com/)
+
+### Installation & Configuration
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/dostam/dash-dost.git
+    cd dash-dost
+    ```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
+
+### Environment Variables
+
+Copy the `.env.example` file to create your local `.env`:
 ```bash
-npm install
+cp .env.example .env
+```
+Ensure you provide your Gemini API key:
+```env
+GEMINI_API_KEY="AI_Studio_API_Key_Here"
+APP_URL="http://localhost:3000"
 ```
 
-### 3. Run the Development Server
+### Running the Development Server
+
+Start the development server:
 ```bash
 npm run dev
 ```
-The development server will mount Vite as active middleware on **port 3000** at `http://localhost:3000`.
+The application will boot in development mode, mounting Vite as an active middleware proxy inside the Express server on **port 3000** at `http://localhost:3000`.
 
-### 4. Production Build
-To compile the full-stack static production client and bundled CommonJS server:
+### Production Build & Execution
+
+To bundle the application for production:
 ```bash
+# Build the client static assets (Vite) and server (esbuild bundle)
 npm run build
+
+# Start the compiled server
 npm start
 ```
+The compiled server is bundled as a single, self-contained CommonJS file located at `dist/server.cjs`, guaranteeing fast, dependency-isolated cold-starts.
+
+### Available Scripts
+
+| Script | Command | Purpose |
+| :--- | :--- | :--- |
+| **`npm run dev`** | `tsx server.ts` | Launches the hot-reloading Express server on port 3000 in dev mode. |
+| **`npm run build`** | `vite build && esbuild ...` | Compiles client assets and bundles server code into `dist/server.cjs`. |
+| **`npm run start`** | `node dist/server.cjs` | Runs the compiled production-ready server. |
+| **`npm run clean`** | `rm -rf dist` | Wipes build artifacts. |
+| **`npm run lint`** | `tsc --noEmit` | Performs comprehensive TypeScript validation checks. |
 
 ---
 
-## 💡 Usage Scenarios
+## 🔌 API Reference
 
-### Scenario A: The Multi-Category E-Commerce Export
-*   **File**: `sales_q2.csv` (Columns: `Order ID`, `Date`, `Product_Category`, `Purchase_Amount`, `Discount_Applied`)
-*   **AI Prompt**: *"Build an executive summary. Show a card for total sales, average discount, and a bar chart of sales by product category."*
-*   **The Result**: Dash-Dost binds the components instantly, resolving `Purchase_Amount` to the sum aggregator and placing it on a clean 3-column top grid.
+### `GET /api/health`
+Verifies server connectivity and environment readiness.
 
-### Scenario B: The Zero-LLM Quick Audit
-*   **File**: `payroll_anonymous.xlsx` (Columns: `Employee Name`, `Department`, `Base Salary`, `Hire Date`)
-*   **Action**: Drag file into the drop-zone, and click **⚡ Quick View**.
-*   **The Result**: An instant, local dashboard is generated. Beautiful KPI cards display base salary metrics, accompanied by categorical departmental bar charts and hire date timelines.
+### `POST /api/generate`
+Generates full dashboard layouts and component configurations from profiled datasets.
+*   **Request Body**:
+    ```json
+    {
+      "profile": { "columns": [{ "name": "Sales", "type": "numeric" }] },
+      "prompt": "Create a executive overview",
+      "history": []
+    }
+    ```
+*   **Response**: Fully bound layout configuration JSON (`DashboardPayload`).
+
+### `POST /api/ingest-url`
+Spins up headless Puppeteer to recursively crawl, snap, and extract data from external analytical dashboards.
+*   **Request Body**:
+    ```json
+    {
+      "url": "https://public.tableau.com/..."
+    }
+    ```
+*   **Response**: Markdown text representation, structured knowledge-base pages, and extracted visual structures.
+
+### `POST /api/ingest-screenshot`
+Leverages Gemini vision models to perform structural OCR and layout mapping on dashboard snapshots.
+*   **Request Body**:
+    ```json
+    {
+      "screenshot": "data:image/png;base64,..."
+    }
+    ```
+*   **Response**: Markdown dossiers and bounding coordinate specifications.
+
+### `POST /api/analyst-chat`
+Handles natural language Q&A, historical contexts, and dynamic ephemeral chart plotting.
+*   **Request Body**:
+    ```json
+    {
+      "message": "What is total sales? Compare regions as a bar chart.",
+      "conversationHistory": [],
+      "datasetContext": { "columns": [], "rows": [] },
+      "dashboardDefinition": { "components": [] },
+      "activeFilterState": {},
+      "knowledgeBase": [],
+      "intelligenceReport": ""
+    }
+    ```
+*   **Response**: Highly structured `AnalystChatResponse` containing segmented answers, grounded source citations, and inline Recharts specifications.
 
 ---
 
-## 🤝 Contribution Guidelines
+## 🧠 AI & LLM Architecture
 
-We love active contributions! If you are interested in making Dash-Dost even better, look into these areas:
-1.  **Enriching `dataBinder.ts`**: Expand the list of fuzzy keywords and string stem-match mappings.
-2.  **Visual Components**: Add new display widgets, radar charts, heatmaps, or Sankey diagrams to `ChartWrapper.tsx`.
-3.  **Performance**: Optimize the client-side parsing speed for datasets exceeding 50,000 rows.
+Dash-Dost employs a state-of-the-art **Grounded Multi-Source Reasoning Pipeline** that guarantees response precision while completely preventing hallucinated statistics.
 
-Please make sure to run the linter and compiler before committing code:
+### Tiered Grounding Hierarchy
+
+The AI prompt forces a strict, sequential confidence evaluation across four distinct information sources:
+1.  **Tier 1: Dashboard Definition (`dashboard_definition`)** — Real chart data, active filters, series coordinates.
+2.  **Tier 2: Dataset Context (`dataset_context`)** — Direct row aggregations and column statistics.
+3.  **Tier 3: Crawled Knowledge Base (`knowledge_base`)** — Scraped texts from remote links/tabs.
+4.  **Tier 4: Screenshot OCR (`screenshot_ocr`)** — Static visual evidence (flagged with a lower confidence rating in the UI).
+
+### Multi-Intent Segmentation Rule
+
+A specialized pre-processing prompt block analyzes compound user messages and splits them into distinct sub-questions. 
+
+```text
+Message: "What was total sales in Q3, how does it compare to Q2, and why did churn drop?"
+                     │
+                     ▼
+           [Segmentation Engine]
+                     │
+       ┌─────────────┼─────────────┐
+       ▼             ▼             ▼
+ [Sub-Question 1] [Sub-Question 2] [Sub-Question 3]
+  "Total Sales"   "Q2 vs Q3"        "Why Churn Drop"
+ (single_kpi)     (comparison)      (explanation)
+```
+
+Each segment maps to its own `AnalystSubAnswer` object, carrying its own metrics, confidence ratings, and data sources.
+
+### Inline Ephemeral Chart Spec Generation
+
+If an answer is comparative or chronological, the LLM produces a declarative `InlineChartSpec` JSON block. The frontend parses this spec to dynamically generate responsive, read-only Recharts on-the-fly inside the chat thread. If confidence is low, the system provides a **"📊 Show as Chart"** chip, letting the user render the visual at will without making extra network requests.
+
+---
+
+## 📸 UI Tour / Placeholders
+
+### High-Fidelity Bento Grid Workspace
+The main workspace organizes widgets into responsive grids. It supports interactive dragging and live-rebuilding when resizing.
+```
+┌───────────────────────────┬───────────────────────────┐
+│     Total Sales KPI       │      Average Margin       │
+│        ₹45.2 Lakhs        │           18.2%           │
+├───────────────────────────┴───────────────────────────┤
+│                                                       │
+│             Monthly Revenue Timeline (Area)           │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+### Context-Aware Conversations & Chat Cards
+Chat answers render beautifully inline as separate, clean visual cards complete with KPI spotlights and source references.
+```
+┌───────────────────────────────────────────────────────┐
+│ 💬 User: "Total sales vs Q2?"                          │
+├───────────────────────────────────────────────────────┤
+│ 🤖 Assistant:                                         │
+│                                                       │
+│ ┌───────────────────────────────────────────────────┐ │
+│ │ • Sub-Answer 1: Total sales has grown by 12.5%.   │ │
+│ │                                                   │ │
+│ │   [ Bar Chart: Sales Comparison by Quarter ]      │ │
+│ │                                                   │ │
+│ │   Sources Used: [dashboard_definition]            │ │
+│ └───────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🧪 Code Quality & Validation
+
+We maintain strict type safety and syntax validation. Ensure you run validation checks before contributing code changes:
+
 ```bash
-# Verify type safety and styling
+# Verify there are no compilation or TypeScript errors
 npm run lint
 
-# Build test
+# Confirm the application bundles successfully
 npm run build
 ```
 
 ---
 
-*Dashboard-Dost — Turn numbers into narratives.*
+## 🤝 Contributing
+
+We are excited about open-source collaboration! To contribute:
+1.  Fork the repository.
+2.  Create a feature branch (`git checkout -b feature/amazing-feature`).
+3.  Ensure your code is strictly typed and adheres to standard patterns.
+4.  Verify your changes pass `npm run lint` and `npm run build`.
+5.  Open a Pull Request describing your changes.
+
+---
+
+## 📜 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+
+## 💖 Acknowledgements
+
+*   **Google AI Studio** for state-of-the-art model APIs.
+*   **Recharts** for premium, modular SVG visualizers.
+*   **Puppeteer** for robust browser scraping capabilities.
+
+---
+*Dash-Dost — Turn numbers into narratives, conversationally.*

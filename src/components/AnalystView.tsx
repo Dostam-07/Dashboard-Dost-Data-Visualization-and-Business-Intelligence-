@@ -10,6 +10,7 @@ import { IngestedDashboard } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChartWrapper } from './ChartWrapper';
 import { FiltersPanel } from './FiltersPanel';
+import { InlineChatChart } from './InlineChatChart';
 import { filterComponentData, ActiveFilterState } from '../utils/filterEngine';
 
 // Spell correction analytics dictionary for fuzzy intent handling
@@ -60,6 +61,22 @@ function performFuzzyCorrection(rawInput: string): { corrected: string; correcte
   };
 }
 
+const sourceLabelMap: Record<string, string> = {
+  dashboard_dataset: "Dashboard Dataset",
+  dashboard_definition: "Chart Data",
+  knowledge_base: "Multi-Page KB",
+  filters: "Active Filters",
+  screenshot: "Screenshot",
+  external_knowledge: "External Knowledge"
+};
+
+const STARTER_QUESTIONS = [
+  "Summarize this dashboard",
+  "Identify top performers",
+  "Are there any anomalies?",
+  "What is the overall trend?"
+];
+
 export function AnalystView() {
   const { 
     ingestedDashboard, setIngestedDashboard, 
@@ -70,6 +87,10 @@ export function AnalystView() {
     answerLanguage, setAnswerLanguage,
     currentPayload, attachedDataset
   } = useAppStore();
+
+  const isScreenshotOnly = !!(ingestedDashboard && 
+    !ingestedDashboard.knowledgeBase && 
+    (!attachedDataset || !currentPayload));
 
   const [isUploading, setIsUploading] = useState(false);
   const [urlInput, setUrlInput] = useState('');
@@ -120,7 +141,7 @@ export function AnalystView() {
       .then(r => r.json())
       .then(data => {
         if (!data.provider || !data.provider.toLowerCase().includes('gemini')) {
-          setProviderError("Analyst tab requires a Gemini API key. Configure it in Settings.");
+          setProviderError("Analyst tab requires a Gemini API key. Please add 'GEMINI_API_KEY' to your Secrets in the AI Studio Settings panel.");
         }
       })
       .catch(e => console.error("Health check failed", e));
@@ -352,10 +373,70 @@ export function AnalystView() {
     handleUrlIngest(creds);
   };
 
-  const handleAskQuestion = async () => {
-    if (!qaInput.trim() || !ingestedDashboard) return;
+  const buildDatasetContext = () => {
+    if (!attachedDataset) return null;
+    const maxRows = 400;
+    const rows = attachedDataset.rows || [];
+    const rowsTruncated = rows.length > maxRows;
+    const cappedRows = rowsTruncated ? rows.slice(0, maxRows) : rows;
+    return {
+      fileName: attachedDataset.fileName || 'Attached Data',
+      rowCount: attachedDataset.rowCount || rows.length,
+      columns: attachedDataset.columns || [],
+      rows: cappedRows,
+      rowsTruncated,
+      sheets: attachedDataset.sheets
+    };
+  };
 
-    const rawMsg = qaInput.trim();
+  const buildDashboardDefinition = () => {
+    if (!currentPayload) return null;
+    return {
+      title: currentPayload.title || '',
+      subtitle: currentPayload.subtitle,
+      tabOrder: currentPayload.tabOrder || [],
+      filters: currentPayload.filters || [],
+      components: (currentPayload.components || []).map((comp: any) => {
+        const seriesData = comp.seriesData || [];
+        const seriesTruncated = seriesData.length > 2000;
+        const cappedSeries = seriesTruncated ? seriesData.slice(0, 500) : seriesData;
+        return {
+          id: comp.id,
+          title: comp.title || '',
+          type: comp.type,
+          tab: comp.tab,
+          description: comp.description,
+          config: comp.config,
+          seriesData: cappedSeries
+        };
+      })
+    };
+  };
+
+  const promoteSuggestedChart = (messageIdx: number, answerIdx: number) => {
+    const updatedHistory = [...chatHistory];
+    const msg = { ...updatedHistory[messageIdx] };
+    if (msg.answers && msg.answers[answerIdx]) {
+      const sub = { ...msg.answers[answerIdx] };
+      if (sub.suggestedChart) {
+        sub.inlineChart = sub.suggestedChart;
+        sub.suggestedChart = null;
+        msg.answers = [...msg.answers];
+        msg.answers[answerIdx] = sub;
+        updatedHistory[messageIdx] = msg;
+        setChatHistory(updatedHistory);
+        if (ingestedDashboard) {
+          setIngestedDashboard({ ...ingestedDashboard, qaHistory: updatedHistory });
+        }
+      }
+    }
+  };
+
+  const handleAskQuestion = async (overrideInput?: string) => {
+    const textToSubmit = overrideInput || qaInput;
+    if (!textToSubmit.trim() || !ingestedDashboard) return;
+
+    const rawMsg = textToSubmit.trim();
     
     // Fuzzy intent matching spelling correction
     const fuzzy = performFuzzyCorrection(rawMsg);
@@ -387,7 +468,10 @@ export function AnalystView() {
           // Support high fidelity verification using original screenshot visual context
           screenshots: ingestedDashboard.captures?.length ? ingestedDashboard.captures : [{ captureIndex: 0, imageBase64: ingestedDashboard.screenshotBase64 }],
           screenshotsB: comparedDashboard ? (comparedDashboard.captures?.length ? comparedDashboard.captures : [{ captureIndex: 0, imageBase64: comparedDashboard.screenshotBase64 }]) : null,
-          knowledgeBase: ingestedDashboard.knowledgeBase
+          knowledgeBase: ingestedDashboard.knowledgeBase,
+          datasetContext: buildDatasetContext(),
+          dashboardDefinition: buildDashboardDefinition(),
+          activeFilterState: filterState
         })
       });
 
@@ -403,7 +487,12 @@ export function AnalystView() {
           suggestedFollowUps: data.suggestedFollowUps || [],
           answerType: data.answerType || 'explanation',
           kpiSpotlight: data.kpiSpotlight || null,
-          miniChartData: data.miniChartData || null
+          miniChartData: data.miniChartData || null,
+          sourcesUsed: data.sourcesUsed || [],
+          externalContext: data.externalContext || null,
+          answers: data.answers || [],
+          headline: data.headline || "",
+          contextExplanation: data.contextExplanation || ""
         };
         const finalHistory = [...nextHistory, responseMsg];
         setChatHistory(finalHistory);
@@ -573,53 +662,67 @@ export function AnalystView() {
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9 }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-[#0a0f1d] to-[#120024] border border-indigo-500/40 p-6 text-white shadow-[0_0_25px_-5px_rgba(99,102,241,0.30)]"
+        className="relative overflow-hidden rounded-3xl bg-slate-950 border border-amber-500/35 p-6 text-white shadow-[0_0_30px_-5px_rgba(245,158,11,0.2)] md:p-8 space-y-4"
       >
-        <div className="absolute top-2 right-2 flex items-center gap-1">
-          <span className="text-xs font-mono text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-800/40 px-2.5 py-1 rounded-full">Spotlight KPI</span>
-          <button 
-            onClick={handleDismissSpotlight} 
-            className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-white/10"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+        {/* Upper metadata row */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs uppercase tracking-widest font-black text-amber-400 font-mono flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span>Spotlight Metric</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono font-bold text-slate-400 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800/80">
+              Active Focus
+            </span>
+            <button 
+              onClick={handleDismissSpotlight} 
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <span className="text-xs uppercase tracking-widest font-extrabold text-indigo-300 font-mono">
-              {spotlight.label || "Target Metric"}
-            </span>
-            <div className="text-4xl md:text-5xl font-black tracking-tight font-sans mt-1 text-white">
+        {/* Big visual number and label */}
+        <div className="space-y-1">
+          <span className="text-xs sm:text-sm font-sans font-semibold text-slate-400">
+            {spotlight.label || "Target Metric"}
+          </span>
+          <div className="text-5xl sm:text-6xl font-black text-white tracking-tight leading-none mt-1.5 flex items-baseline gap-2">
+            <span className="bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
               {spotlight.value}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5 pt-1.5 border-t border-indigo-500/10">
-            {spotlight.context && (
-              <div className="text-sm font-medium flex items-center gap-2">
-                <span className={`inline-flex items-center justify-center p-0.5 rounded-sm text-xs ${
-                  spotlight.trend === 'up' ? 'text-emerald-400 bg-emerald-950/20' : 
-                  spotlight.trend === 'down' ? 'text-rose-400 bg-rose-950/20' : 'text-slate-400'
-                }`}>
-                  {spotlight.trend === 'up' ? '↑' : spotlight.trend === 'down' ? '↓' : '•'}
-                </span>
-                <span className="text-slate-300">{spotlight.context}</span>
-              </div>
+            </span>
+            {spotlight.trend && (
+              <span className={`text-base sm:text-lg font-bold flex items-center gap-0.5 px-2 py-0.5 rounded-full ${
+                spotlight.trend === 'up' ? 'text-emerald-400 bg-emerald-950/40' : 
+                spotlight.trend === 'down' ? 'text-rose-400 bg-rose-950/40' : 'text-slate-400 bg-slate-900'
+              }`}>
+                {spotlight.trend === 'up' ? '↑' : spotlight.trend === 'down' ? '↓' : '•'}
+              </span>
             )}
+          </div>
+        </div>
+
+        {/* Rich explanation & verification details */}
+        {spotlight.context && (
+          <div className="border-t border-slate-900 pt-4 space-y-3">
+            <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-sans whitespace-pre-line font-medium">
+              {spotlight.context}
+            </p>
             
             {spotlight.sourceElementTitle && (
-              <div className="text-xs text-indigo-400/80 font-medium">
-                📍 Verified Position: <span className="font-mono underline">{spotlight.sourceElementTitle}</span>
+              <div className="text-xs text-indigo-400/90 font-medium flex items-center gap-1.5 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/15 w-fit">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                <span>Verified Position: <strong className="font-semibold underline">{spotlight.sourceElementTitle}</strong></span>
               </div>
             )}
           </div>
-        </div>
+        )}
 
         {/* Depleting progress timer card bar */}
         <div className="absolute bottom-0 left-0 h-1 bg-slate-800 w-full">
           <div 
-            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-1000 ease-linear"
+            className="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-500 transition-all duration-1000 ease-linear"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
@@ -1438,7 +1541,7 @@ export function AnalystView() {
               <Sparkles className="w-4 h-4 text-indigo-400" /> 
               {comparedDashboard ? 'Multimodal Comparative Dialogue' : 'Telemetry Q&A Intelligence'}
             </h2>
-            <p className="text-xs text-slate-400 font-mono mt-0.5 uppercase tracking-widest font-extrabold">Gemini Grounded Reasoning</p>
+            <p className="text-xs text-slate-400 font-mono mt-0.5 uppercase tracking-widest font-extrabold">Gemini Flash Reasoning</p>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -1498,6 +1601,19 @@ export function AnalystView() {
         {/* Chat Message Scroll frame containing Answer Spotlight & Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-950/60 leading-relaxed font-sans mt-0.5">
           
+          {/* Snapshot-Only fallback warning banner */}
+          {isScreenshotOnly && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs flex items-start gap-2.5 shadow-md">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+              <div>
+                <h5 className="font-bold text-amber-400 font-sans">Snapshot-Only Fallback Active</h5>
+                <p className="text-amber-100/80 mt-1 leading-relaxed font-sans">
+                  You are analyzing a static visual snapshot. Since no structured dataset or multi-page knowledge base is attached, AI reasoning is operating on visual context alone. Insights may be less precise or limited to what is visually legible.
+                </p>
+              </div>
+            </div>
+          )}
+          
           {/* Active Highlight Spotlight widget */}
           <AnimatePresence>
             {activeSpotlight && (
@@ -1543,13 +1659,155 @@ export function AnalystView() {
                 animate={{ opacity: 1, y: 0 }}
                 className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1 group`}
               >
-                <div className="relative group flex items-start gap-2">
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                <div className="relative group flex items-start gap-2 w-full">
+                  <div className={`rounded-2xl px-4 py-2.5 text-sm ${
                     msg.role === 'user' 
-                      ? 'bg-indigo-600 text-white rounded-tr-xs' 
-                      : 'bg-[#111118]/85 text-slate-100 border border-slate-800 rounded-tl-xs shadow-md'
+                      ? 'bg-indigo-600 text-white rounded-tr-xs max-w-[85%]' 
+                      : 'bg-[#111118]/85 text-slate-100 border border-slate-800 rounded-tl-xs shadow-md w-full sm:max-w-xl'
                   }`}>
-                    <p className="whitespace-pre-line leading-relaxed font-sans">{msg.content || msg.answerText}</p>
+                    {/* If there are multiple segmented sub-answers, render them stacked nicely */}
+                    {msg.role === 'analyst' && msg.answers && msg.answers.length > 1 ? (
+                      <div className="space-y-4">
+                        <div className="text-xs font-black uppercase tracking-wider text-indigo-400 mb-2 border-b border-indigo-950/40 pb-1.5 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Multi-Intent Q&A Insights</span>
+                        </div>
+                        {msg.answers.map((sub: any, sIdx: number) => (
+                          <div key={sub.id || sIdx} className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 shadow-sm space-y-2">
+                            {/* Sub-Question Header */}
+                            {sub.questionText && (
+                              <div className="text-[11px] font-sans font-bold text-slate-400 bg-slate-950/60 px-2 py-1 rounded-md inline-block max-w-full truncate">
+                                <span className="text-indigo-400 mr-1">Q:</span> {sub.questionText}
+                              </div>
+                            )}
+                            
+                            {/* Headline (Direct answer) */}
+                            {sub.headline && (
+                              <h4 className="text-sm sm:text-base font-extrabold tracking-tight text-white mb-1 leading-snug">
+                                {sub.headline}
+                              </h4>
+                            )}
+                            
+                            {/* Sub-Answer Text */}
+                            <p className="whitespace-pre-line leading-relaxed font-sans text-slate-300 text-xs sm:text-sm">
+                              {sub.contextExplanation || sub.answerText || sub.content}
+                            </p>
+
+                            {/* Optional KPI Spotlight inside sub-answer */}
+                            {sub.kpiSpotlight && (
+                              <div className="my-2 p-3.5 rounded-xl bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 border border-indigo-500/15 max-w-sm">
+                                <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400">{sub.kpiSpotlight.label}</div>
+                                <div className="text-2xl font-black text-slate-100 tracking-tight mt-1">{sub.kpiSpotlight.value}</div>
+                                {sub.kpiSpotlight.trend && (
+                                  <div className="flex items-center gap-1.5 text-xs mt-1.5 font-sans font-medium">
+                                    <span className={sub.kpiSpotlight.isPositive !== false ? 'text-emerald-400' : 'text-rose-400'}>
+                                      {sub.kpiSpotlight.trend}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Inline Chart */}
+                            {sub.inlineChart && (
+                              <InlineChatChart spec={sub.inlineChart} />
+                            )}
+
+                            {/* Suggested Chart Promo */}
+                            {sub.suggestedChart && (
+                              <div className="mt-2 p-2.5 rounded-lg bg-indigo-950/20 border border-indigo-900/30 flex items-center justify-between gap-3">
+                                <div className="text-[11px] font-sans text-slate-400">
+                                  <span className="font-semibold text-slate-300">📊 Chart Option Available:</span> {sub.suggestedChart.title}
+                                </div>
+                                <button
+                                  onClick={() => promoteSuggestedChart(idx, sIdx)}
+                                  className="shrink-0 text-[10px] font-sans font-bold uppercase tracking-wider bg-indigo-500 hover:bg-indigo-600 text-white px-2.5 py-1 rounded-md transition-colors"
+                                >
+                                  Show as Chart
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Sub-Answer Sources Badge row */}
+                            {sub.sourcesUsed && sub.sourcesUsed.length > 0 && (
+                              <div className="flex items-center flex-wrap gap-1 text-[9px] font-mono tracking-wider text-slate-500 px-1 font-bold uppercase mt-1">
+                                <span>Sources:</span>
+                                {sub.sourcesUsed.map((srcKey: string, sSubIdx: number) => {
+                                  const label = sourceLabelMap[srcKey] || srcKey;
+                                  return (
+                                    <span key={sSubIdx} className="bg-slate-950 border border-indigo-950 px-1 py-0.5 rounded-sm text-indigo-400">
+                                      {label}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Sub-Answer External Context */}
+                            {sub.externalContext?.used && (
+                              <div className="mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-[11px]">
+                                <div className="flex items-center gap-1 font-bold mb-0.5 text-amber-400">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  <span>External Knowledge {!sub.externalContext.verified && '(unverified)'}</span>
+                                </div>
+                                <p className="font-sans leading-relaxed text-amber-100/90">{sub.externalContext.summary}</p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      /* Fallback or single sub-answer rendering path */
+                      <>
+                        {msg.role === 'user' ? (
+                          <p className="whitespace-pre-line leading-relaxed font-sans">{msg.content}</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {/* Headline (Direct answer) */}
+                            {(msg.headline || msg.answers?.[0]?.headline) && (
+                              <h4 className="text-sm sm:text-base font-extrabold tracking-tight text-white mb-1 leading-snug">
+                                {msg.headline || msg.answers?.[0]?.headline}
+                              </h4>
+                            )}
+                            
+                            {/* Plain-language explanation */}
+                            <p className="whitespace-pre-line leading-relaxed font-sans text-slate-300 text-xs sm:text-sm">
+                              {msg.contextExplanation || msg.answers?.[0]?.contextExplanation || msg.content || msg.answerText}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Inline Chart for single answer */}
+                        {msg.role === 'analyst' && msg.answers?.[0]?.inlineChart && (
+                          <InlineChatChart spec={msg.answers[0].inlineChart} />
+                        )}
+
+                        {/* Suggested Chart Promo for single answer */}
+                        {msg.role === 'analyst' && msg.answers?.[0]?.suggestedChart && (
+                          <div className="mt-2.5 p-2.5 rounded-xl bg-indigo-950/20 border border-indigo-900/30 flex items-center justify-between gap-3">
+                            <div className="text-xs font-sans text-slate-400">
+                              <span className="font-semibold text-slate-300">📊 Chart Option Available:</span> {msg.answers[0].suggestedChart.title}
+                            </div>
+                            <button
+                              onClick={() => promoteSuggestedChart(idx, 0)}
+                              className="shrink-0 text-[10px] font-sans font-bold uppercase tracking-wider bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors"
+                            >
+                              Show as Chart
+                            </button>
+                          </div>
+                        )}
+
+                        {msg.role === 'analyst' && msg.externalContext?.used && (
+                          <div className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs">
+                            <div className="flex items-center gap-1.5 font-bold mb-1 text-amber-400">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              <span>External Knowledge {!msg.externalContext.verified && '(unverified)'}</span>
+                            </div>
+                            <p className="font-sans leading-relaxed text-amber-100/90">{msg.externalContext.summary}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                   <button 
                     onClick={() => deleteChatMessage(idx)}
@@ -1567,6 +1825,20 @@ export function AnalystView() {
                         {el.elementTitle || el.dataType || "Widget Card"}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {msg.role === 'analyst' && msg.sourcesUsed && msg.sourcesUsed.length > 0 && (
+                  <div className="flex items-center flex-wrap gap-1 text-[10px] font-mono tracking-wider text-slate-500 px-1 font-bold uppercase mt-1">
+                    <span>Sources Used:</span>
+                    {msg.sourcesUsed.map((srcKey: string, sIdx: number) => {
+                      const label = sourceLabelMap[srcKey] || srcKey;
+                      return (
+                        <span key={sIdx} className="bg-slate-900 border border-indigo-900/30 px-1.5 py-0.5 rounded-sm text-indigo-400">
+                          {label}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </motion.div>
@@ -1605,13 +1877,25 @@ export function AnalystView() {
           </AnimatePresence>
 
           {chatHistory.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-500 max-w-sm mx-auto space-y-3.5">
+            <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-500 max-w-sm mx-auto space-y-4">
               <Languages className="w-10 h-10 text-slate-700 animate-pulse" />
               <div>
                 <h4 className="font-bold text-sm text-slate-300">Dashboard Reasoning Desk</h4>
-                <p className="text-xs text-slate-500 leading-relaxed mt-1">
+                <p className="text-xs text-slate-500 leading-relaxed mt-1 mb-4">
                   Input coordinates or metric segments to trace. Spell errors corrected on execution automatically.
                 </p>
+                
+                <div className="flex flex-wrap justify-center gap-2">
+                  {STARTER_QUESTIONS.map((q, idx) => (
+                    <button 
+                      key={idx}
+                      onClick={() => handleAskQuestion(q)}
+                      className="text-[10px] uppercase font-mono tracking-wider font-extrabold bg-[#12121e] border border-zinc-800 hover:bg-indigo-950/20 hover:border-indigo-500/30 text-indigo-400 px-3 py-1.5 rounded-full cursor-pointer transition-all"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -1644,7 +1928,7 @@ export function AnalystView() {
             />
 
             <button 
-              onClick={handleAskQuestion}
+              onClick={() => handleAskQuestion()}
               disabled={!qaInput.trim()}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider px-3.5 py-2 rounded-lg transition-colors cursor-pointer shrink-0"
             >
@@ -1653,12 +1937,12 @@ export function AnalystView() {
           </div>
 
           {/* Follow up suggestion chips list */}
-          {chatHistory.length > 0 && chatHistory[chatHistory.length - 1].suggestedFollowUps?.length > 0 && (
+          {chatHistory.length > 0 && !isChatResponding && chatHistory[chatHistory.length - 1].role === 'analyst' && chatHistory[chatHistory.length - 1].suggestedFollowUps?.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5 shrink-0 overflow-x-auto select-none">
               {chatHistory[chatHistory.length - 1].suggestedFollowUps.map((prompt: string, idx: number) => (
                 <button 
                   key={idx} 
-                  onClick={() => { setQaInput(prompt); }} 
+                  onClick={() => { handleAskQuestion(prompt); }} 
                   className="text-xs uppercase font-mono tracking-wider font-extrabold bg-[#12121e] border border-zinc-800 hover:bg-indigo-950/20 hover:border-indigo-500/30 text-indigo-400 px-3 py-1.5 rounded-full cursor-pointer transition-all whitespace-nowrap"
                 >
                   {prompt}

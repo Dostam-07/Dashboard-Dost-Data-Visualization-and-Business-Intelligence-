@@ -23,7 +23,7 @@ const getActiveProvider = () => {
   if (geminiKey && geminiKey !== "MY_GEMINI_API_KEY" && geminiKey.trim() !== "") {
     return {
       provider: "gemini" as const,
-      providerName: "Google Gemini (gemini-flash-latest)",
+      providerName: "Google Gemini Flash",
       isConfigured: true
     };
   } else if (openRouterKey && openRouterKey !== "MY_OPENROUTER_API_KEY" && openRouterKey.trim() !== "") {
@@ -76,7 +76,7 @@ const getOllamaClient = () => {
 const callGeminiWithRetry = async (
   modelFactory: (model: string) => Promise<any>,
   operationName: string,
-  models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
+  models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"],
   retriesPerModel = 2,
   baseDelay = 2000 // Increased base delay to help with rate limits
 ) => {
@@ -269,7 +269,7 @@ Core Operations Directives:
         let stream: any;
         try {
           stream = await callGeminiWithRetry(async (model) => {
-             return await ai.models.generateContentStream({
+            return await ai.models.generateContentStream({
               model,
               contents,
               config: {
@@ -514,17 +514,18 @@ Core Operations Directives:
       if (active.provider === "gemini") {
         const ai = getGeminiClient();
         const response = await callGeminiWithRetry(async (model) => {
-        return await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            systemInstruction,
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
+          return await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+              responseMimeType: "application/json"
+            }
+          });
         }, "Query Interpretation");
-        const query = JSON.parse(response.text || "{}");
+        const jsonText = (response.text || "{}").replace(/```json\s?/, "").replace(/```\s?/, "").trim();
+        const query = JSON.parse(jsonText);
         res.json({ success: true, query });
       } else {
         const client = active.provider === "openrouter" ? getOpenRouterClient() : getOllamaClient();
@@ -619,322 +620,35 @@ Core Operations Directives:
         });
       }
 
-      // If credentials are provided, inject and log in
-      if (credentials) {
-        console.log("Injecting credentials and trying to authenticate...");
-        try {
-          // Find standard login/username/password selectors
-          await page.evaluate((creds) => {
-            const userInputs = document.querySelectorAll('input[type="email"], input[type="text"], input[name*="user"], input[name*="email"], input[id*="user"]');
-            const passInputs = document.querySelectorAll('input[type="password"]');
-            
-            if (userInputs.length > 0 && creds.username) {
-              const uEl = userInputs[0] as HTMLInputElement;
-              uEl.value = creds.username;
-              uEl.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            if (passInputs.length > 0 && creds.password) {
-              const pEl = passInputs[0] as HTMLInputElement;
-              pEl.value = creds.password;
-              pEl.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-          }, credentials);
-
-          // Submit using primary submit/button or form
-          await page.evaluate(() => {
-            const submitBtn = document.querySelector('button[type="submit"], input[type="submit"], .btn-primary, button.login');
-            if (submitBtn) {
-              (submitBtn as HTMLElement).click();
-            } else {
-              const forms = document.querySelectorAll('form');
-              if (forms.length > 0) {
-                forms[0].submit();
-              }
-            }
-          });
-
-          // Wait for page transition
-          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-          await new Promise(r => setTimeout(r, 2000));
-
-          // Post-auth re-verification
-          const postAuthState = await page.evaluate(() => {
-            const hasPasswordField = document.querySelector('input[type="password"]') !== null;
-            return { requiresAuth: hasPasswordField };
-          });
-
-          if (postAuthState.requiresAuth) {
-            await browser.close();
-            return res.json({ success: false, error: "Authentication failed. Please check your username and password." });
-          }
-        } catch (loginErr: any) {
-          console.error("Login attempt exception:", loginErr);
-          await browser.close();
-          return res.json({ success: false, error: `Authentication failed during process: ${loginErr.message}` });
-        }
-      }
-
-      const pageTitle = await page.title();
-
-      // Get platform-specific selectors
-      const selectorsToUse = getPlatformSelectors(validUrl, pageTitle);
-
-      // 3. Detect internal tabs/sub-pages using custom platform selectors
-      const tabsDetected = await page.evaluate((selectors) => {
-        const found: { label: string; index: number }[] = [];
-        let index = 0;
-        selectors.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => {
-            const text = (el.textContent || "").trim();
-            if (text && text.length < 30 && !found.some(f => f.label === text)) {
-              found.push({ label: text, index: index++ });
-            }
-          });
-        });
-        return found;
-      }, selectorsToUse);
-
-      // 4. Multi-Page, Multi-Scroll Capture Protocol (Triggers lazy layout and extracts high res screenshots of stages)
-      const captures: any[] = [];
-      let captureIndex = 0;
-      let totalPagesCaptured = 0;
-      const MAX_PAGES = 15;
-      const MAX_CAPTURES = 40;
-      const viewportHeight = 900;
-      const stepSize = 600;
-
-      const domTextSet = new Set<string>();
-      const svgDataSet: any[] = [];
-
-      const scrapeActivePageData = async () => {
-        try {
-          const texts = await page.evaluate(() => {
-            const list: string[] = [];
-            document.querySelectorAll('text, tspan, .label, .value-label, [class*="chart-value"], [class*="kpi-value"], [class*="metric"], td, th, h1, h2, h3, h4, h5, h6, p, li, span, a').forEach(el => {
-              const txt = (el.textContent || "").trim();
-              if (txt && txt.length > 1 && txt.length < 150) {
-                list.push(txt);
-              }
-            });
-            return list;
-          });
-          texts.forEach(t => domTextSet.add(t));
-
-          const svgs = await page.evaluate(() => {
-            const elements: any[] = [];
-            document.querySelectorAll('svg').forEach((svg, idx) => {
-              const svgTexts: string[] = [];
-              svg.querySelectorAll('text, tspan').forEach(t => {
-                const c = (t.textContent || "").trim();
-                if (c.length > 0 && c.length < 100) svgTexts.push(c);
-              });
-              if (svgTexts.length > 0) {
-                elements.push({ labelItems: svgTexts.slice(0, 30) });
-              }
-            });
-            return elements.slice(0, 15);
-          });
-          
-          svgs.forEach(s => {
-            if (!svgDataSet.some(existing => JSON.stringify(existing.labelItems) === JSON.stringify(s.labelItems))) {
-              svgDataSet.push({ svgIndex: svgDataSet.length, labelItems: s.labelItems });
-            }
-          });
-        } catch (err) {
-          console.error("Error scraping page data segment:", err);
-        }
-      };
-
-      const capturePageScrolls = async () => {
-         const fullHeight = await page.evaluate(() => document.body.scrollHeight || document.documentElement.scrollHeight || 1080);
-         console.log(`Scrolling viewport across total height of ${fullHeight}px for page ${totalPagesCaptured + 1}`);
-         let currentScroll = 0;
-         while (currentScroll < fullHeight && captureIndex < MAX_CAPTURES) {
-           await page.evaluate((y) => window.scrollTo(0, y), currentScroll);
-           await new Promise(r => setTimeout(r, 1200)); // Wait for charts to catch scroll and paint
-           const base64Buffer = await page.screenshot({ fullPage: false, encoding: 'base64' });
-           captures.push({
-              captureIndex,
-              scrollPosition: currentScroll,
-              pageNumber: totalPagesCaptured + 1,
-              imageBase64: `data:image/png;base64,${base64Buffer}`
-           });
-           
-           captureIndex++;
-           
-           // Scrape text context as we scroll to catch lazily rendered tables/charts!
-           await scrapeActivePageData();
-
-           if (currentScroll + viewportHeight >= fullHeight) break;
-           currentScroll += stepSize;
-         }
-         totalPagesCaptured++;
-      };
-
-      await capturePageScrolls();
-
-      // Capture same-domain links (sidebar/tabs), specifically allowing query parameters like ?tab=...
-      const otherLinks = await page.evaluate((maxPages) => {
-          const links = Array.from(document.querySelectorAll('a'));
-          const currentBase = window.location.origin;
-          const currentUrl = window.location.href.split('#')[0];
-          return links
-             .map(a => a.href.split('#')[0]) // ignore hash differences
-             .filter(href => href.startsWith(currentBase) && href !== currentUrl)
-             .filter((value, index, self) => self.indexOf(value) === index)
-             .slice(0, maxPages - 1); // limit to available remaining pages
-      }, MAX_PAGES);
-
-      for (const link of otherLinks) {
-          if (totalPagesCaptured >= MAX_PAGES || captureIndex >= MAX_CAPTURES) break;
-          console.log(`Navigating to additional dashboard tab/link: ${link}`);
-          try {
-              await page.goto(link, { waitUntil: 'networkidle2', timeout: 20000 });
-              await new Promise(r => setTimeout(r, 2000));
-              await capturePageScrolls();
-          } catch (e) {
-              console.warn(`Failed to capture link ${link}`, e);
-          }
-      }
-
-      // In addition to links, let's detect and sequentially click physical tab elements!
-      console.log("Detecting physical clickable tab elements on page...");
-      const physicalTabCount = await page.evaluate((selectors) => {
-        let foundElements: string[] = [];
-        selectors.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => {
-            const text = (el.textContent || "").trim();
-            if (text && text.length > 1 && text.length < 30 && !(el as any).disabled) {
-              if (!foundElements.includes(text)) {
-                foundElements.push(text);
-              }
-            }
-          });
-        });
-        return foundElements.length;
-      }, selectorsToUse);
-
-      console.log(`Found ${physicalTabCount} physical tab elements. Initiating sequential tab click crawl...`);
-      for (let tabIdx = 0; tabIdx < physicalTabCount; tabIdx++) {
-        if (totalPagesCaptured >= MAX_PAGES || captureIndex >= MAX_CAPTURES) break;
-        console.log(`Clicking physical tab index ${tabIdx}...`);
-        const clicked = await page.evaluate((idx, selectors) => {
-          let foundElements: HTMLElement[] = [];
-          selectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => {
-              const text = (el.textContent || "").trim();
-              if (text && text.length > 1 && text.length < 30 && !(el as any).disabled) {
-                if (!foundElements.some(existing => (existing.textContent || "").trim() === text)) {
-                  foundElements.push(el as HTMLElement);
-                }
-              }
-            });
-          });
-          if (foundElements[idx]) {
-            foundElements[idx].click();
-            return { success: true, label: (foundElements[idx].textContent || "").trim() };
-          }
-          return { success: false, label: "" };
-        }, tabIdx, selectorsToUse);
-
-        if (clicked.success) {
-          console.log(`Successfully clicked tab "${clicked.label}". Waiting for data fetch...`);
-          await new Promise(r => setTimeout(r, 3000)); // Wait for tab chart render
-          await capturePageScrolls();
-        }
-      }
-
-      // Loop to capture multiple paginated pages if they exist (on the last visited page or main page)
-      while (totalPagesCaptured < MAX_PAGES && captureIndex < MAX_CAPTURES) {
-         const hasNextPage = await page.evaluate(() => {
-            const btnSelectors = [
-                '.pagination-next', '[aria-label="Next"]', '[aria-label="Next page"]',
-                '.rc-pagination-next', '.ant-pagination-next',
-                'button.next', 'a.next', '[title="Next Page"]', '[aria-label="next"]',
-                '.MuiTablePagination-actions button[title="Next page"]'
-            ];
-            
-            let targetBtn: HTMLElement | null = null;
-            for (const sel of btnSelectors) {
-                const btn = document.querySelector(sel) as HTMLElement;
-                if (btn && !btn.hasAttribute('disabled') && !btn.className.includes('disabled') && !btn.className.includes('Mui-disabled')) {
-                    targetBtn = btn;
-                    break;
-                }
-            }
-
-            if (!targetBtn) {
-               const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
-               for (const btn of buttons) {
-                   const txt = (btn.textContent || '').trim().toLowerCase();
-                   if ((txt === 'next' || txt === 'next page' || txt === '>') && !btn.hasAttribute('disabled') && !btn.className.includes('disabled') && !btn.className.includes('Mui-disabled')) {
-                       targetBtn = btn as HTMLElement;
-                       break;
-                   }
-               }
-            }
-
-            if (targetBtn) {
-               targetBtn.click();
-               return true;
-            }
-            return false;
-         });
-
-         if (hasNextPage) {
-            console.log(`Clicked next page. Waiting for load...`);
-            await new Promise(r => setTimeout(r, 3000));
-            await page.evaluate(() => window.scrollTo(0, 0));
-            await capturePageScrolls();
-         } else {
-            console.log(`No more pagination found after ${totalPagesCaptured} pages.`);
-            break;
-         }
-      }
-      
-      console.log(`Finished capturing, total pages: ${totalPagesCaptured}, total captures: ${captures.length}`);
-
-      // Scroll back to top
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await new Promise(r => setTimeout(r, 500));
-
-      // Build consolidated arrays from Sets
-      const domTextData = Array.from(domTextSet).slice(0, 500); // Consolidated top 500 unique strings across all tabs
-      const svgData = svgDataSet.slice(0, 40); // Consolidated top 40 SVG charts across all tabs
-
-      // Take overall high quality full page screenshot as master thumbnail
-      const screenshotBuffer = await page.screenshot({ 
-        fullPage: true, 
-        encoding: 'base64' 
-      });
-      
-      console.log(`[Server] Initiating semantic crawler for structured knowledge base: ${validUrl}`);
-      const cookies = await page.cookies().catch(() => []);
+      console.log(`[Server] Initiating consolidated semantic crawler for: ${validUrl}`);
       const crawlerService = new DashboardCrawlerService();
       const crawlResult = await crawlerService.crawl(
         validUrl,
         browser,
         credentials || null,
-        cookies && cookies.length > 0 ? cookies : (sessionCookies || null)
+        sessionCookies || null
       ).catch(err => {
         console.error("DashboardCrawlerService failed to crawl:", err);
         return null;
       });
 
-      await browser.close();
+      if (!crawlResult) {
+        await browser.close();
+        return res.status(500).json({ error: "Failed to crawl the dashboard" });
+      }
 
       res.json({
         success: true,
-        pageTitle,
+        pageTitle: crawlResult.pageTitle,
         capturedAt: new Date().toISOString(),
-        fullPageScreenshotBase64: `data:image/png;base64,${screenshotBuffer}`,
-        captures,
-        tabsDetected,
-        domTextData,
-        svgData,
-        platformDetected: tabsDetected.length > 0 ? "BI Dashboard with navigation" : "Web Dashboard",
-        knowledgeBase: crawlResult ? crawlResult.knowledgeBase : null,
-        knowledgeBaseStatus: crawlResult ? 'success' : 'failed'
+        fullPageScreenshotBase64: crawlResult.fullPageScreenshotBase64,
+        captures: crawlResult.captures,
+        tabsDetected: crawlResult.tabsDetected,
+        domTextData: crawlResult.domTextData,
+        svgData: crawlResult.svgData,
+        platformDetected: crawlResult.tabsDetected.length > 0 ? "BI Dashboard with navigation" : "Web Dashboard",
+        knowledgeBase: crawlResult.knowledgeBase,
+        knowledgeBaseStatus: 'success'
       });
     } catch (error: any) {
       console.error("Dashboard Ingestion Error:", error);
@@ -1106,7 +820,8 @@ Output perfectly valid JSON matching this schema:
               });
             }, `Screenshot Ingestion Batch ${b + 1}`);
 
-            const batchReport = JSON.parse(response.text || "{}");
+            const jsonText = (response.text || "{}").replace(/```json\s?/, "").replace(/```\s?/, "").trim();
+            const batchReport = JSON.parse(jsonText);
             
             if (b === 0) {
               report.dashboardTitle = batchReport.dashboardTitle || report.dashboardTitle;
@@ -1174,7 +889,8 @@ Output perfectly valid JSON matching this schema:
           });
         }, "Screenshot Ingestion Single");
 
-        report = JSON.parse(response.text || "{}");
+        const jsonText = (response.text || "{}").replace(/```json\s?/, "").replace(/```\s?/, "").trim();
+        report = JSON.parse(jsonText);
       }
 
       res.json({ success: true, report });
@@ -1190,7 +906,18 @@ Output perfectly valid JSON matching this schema:
 
   // Analyst Chat (Phase 1 & 4 Comparison)
   app.post("/api/analyst-chat", async (req, res) => {
-    const { message, intelligenceReport, intelligenceReportB, conversationHistory, screenshots, screenshotsB, knowledgeBase } = req.body;
+    const {
+      message,
+      intelligenceReport,
+      intelligenceReportB,
+      conversationHistory,
+      screenshots,
+      screenshotsB,
+      knowledgeBase,
+      datasetContext,
+      dashboardDefinition,
+      activeFilterState
+    } = req.body;
     try {
       const active = getActiveProvider();
       
@@ -1201,49 +928,99 @@ ${JSON.stringify(intelligenceReportB)}
 ` : '';
 
       const knowledgeBaseText = knowledgeBase ? `
-CRITICAL MULTI-PAGE DATA SOURCE (Dashboard Knowledge Base):
-You have access to the complete, multi-page database containing extracted charts, tables, KPIs, and filters from ALL tabs/sheets of the dashboard.
-Use this structured information as your primary ground-truth data repository. If the user asks about other pages, comparing across tabs, or searches, read and analyze this Knowledge Base to formulate your answers. Do NOT limit your answers to only the active visible page.
-
-Dashboard Knowledge Base JSON:
+Dashboard Knowledge Base JSON (Dashboard Crawler Service Multi-Page Data Source containing extracted charts, tables, KPIs, and filters from ALL tabs/sheets of the dashboard):
 ${JSON.stringify(knowledgeBase)}
-` : '';
+` : 'Not available.';
 
-      const systemInstruction = `You are a dashboard reading expert. Answer the user's questions based on the provided multi-page Knowledge Base JSON (if available), intelligence report JSON, AND the visual bytes of the dashboard image(s).
-      
-Dashboard A JSON:
-${JSON.stringify(intelligenceReport)}
-${comparisonText}
+      const datasetContextText = datasetContext ? `
+Row count: ${datasetContext.rowCount}${datasetContext.rowsTruncated ? ` (showing a sample of ${datasetContext.rows.length} rows; use column statistics below for anything beyond the sample)` : ""}.
+Columns: ${JSON.stringify(datasetContext.columns)}
+Sample rows: ${JSON.stringify(datasetContext.rows)}` : 'Not available for this dashboard.';
+
+      const dashboardDefinitionText = dashboardDefinition ? `
+Dashboard Definition JSON (exact, already-computed numbers currently rendered):
+${JSON.stringify(dashboardDefinition)}` : 'Not available for this dashboard.';
+
+      const activeFilterStateText = activeFilterState ? `
+Active Filter State JSON (what slice of data the user is currently viewing):
+${JSON.stringify(activeFilterState)}` : 'No filters currently active.';
+
+      const systemInstruction = `You are a dashboard reading and reasoning expert. Answer the user's question using the following sources, IN THIS PRIORITY ORDER. Higher-numbered tiers are lower priority and must never override a lower-numbered tier's data.
+
+TIER 1 — Live Dashboard Definition (highest trust; exact, already-computed numbers currently rendered):
+${dashboardDefinitionText}
+
+TIER 2 — Underlying Dataset (ground truth raw data + statistical profile):
+${datasetContextText}
+
+TIER 3 — Dashboard Knowledge Base (multi-page/tab structured data, including hidden tabs, for externally ingested dashboards):
 ${knowledgeBaseText}
 
+TIER 4 — Active Filter State (what slice of data the user is currently viewing):
+${activeFilterStateText}
+
+TIER 5 — Screenshot-derived Intelligence Report (OCR from pixels — LOWEST-CONFIDENCE structured source, use only to fill gaps in Tiers 1-4):
+${intelligenceReport ? JSON.stringify(intelligenceReport) : "Not available."}
+${comparisonText}
+
+TIER 6 — Screenshots: attached as image bytes below. Use ONLY for layout/visual questions (colors, positions, chart types) or to fill genuine gaps when no structured source covers the question. Do not extract numbers from screenshots if Tiers 1-5 contain the answer.
+
+TIER 7 — External real-world knowledge: use only if the question cannot be answered from Tiers 1-6, per the External Knowledge Rule below.
+
 CRITICAL RULES:
-1. Grounded Accuracy: Only answer from values physically found in the report or image labels/charts. If they are absent, say so and explain what is visible. Do NOT invent, estimate, or hallucinate data points.
-2. Formats: Handle Indian rupee formatted numbers (e.g. Lakhs, Crores) and western numbering systems properly.
-3. Answer Spotlight:
+1. Grounded accuracy: only state numbers/facts present in Tiers 1-6, or clearly-labeled external context per Tier 7. Never invent, estimate, or hallucinate a data point.
+2. If structured data (Tiers 1-4) conflicts with what a screenshot appears to show, always trust the structured data. Screenshots are for layout/visual questions only, not for extracting numbers when structured data is available. Never invent, estimate, or hallucinate a data point that is not present in any provided source.
+3. Formats: handle Indian rupee formatting (Lakhs, Crores) and Western numbering correctly.
+4. Answer Spotlight:
    - When the user asks for a single KPI number or localized value, classify this as answerType: "single_kpi" and populate "kpiSpotlight".
    - When the queries seek multiple metrics over time or trends, set answerType: "trend" and populate "miniChartData".
    - If not found or unsupported, return answerType: "unavailable".
    - Otherwise use: "comparison" or "list" or "explanation".
+5. External Knowledge Rule: If the user's question requires context beyond the dashboard (e.g., 'why is inflation rising', 'why are wheat prices increasing', 'why is churn increasing industry-wide'), first answer using dashboard evidence, then clearly add a separate, labeled section using verified real-world context if available. Structure your "externalContext" field to summarize that context and set "verified" to true only if you used a search/grounding tool and can attribute the information to a real, checkable source category (e.g. 'recent economic reporting', 'industry news'); otherwise set "verified" to false and explicitly say in "externalContext.summary" that this could not be verified and should be treated as background context, not fact. Never fabricate specific statistics, dates, or attributed claims for external context.
+6. Explainability Rule: Populate "sourcesUsed" truthfully with every source category that materially contributed to this specific answer — do not include a source you did not actually rely on.
+7. Low-Confidence Rule: If datasetContext, dashboardDefinition, and knowledgeBase are all null/absent, and only a screenshot-derived intelligenceReport or raw screenshots are available, prefix "interpretation" with a short note that this analysis is based on a static visual snapshot and may miss data not visible in the captured image(s).
+8. Multi-Intent Segmentation Rule: Analyze the user's message. If it contains multiple distinct questions, parts, or requests (e.g., if there are multiple question marks, multiple sentences, or multiple clauses joined by "and", "also", "then", "compare", "along with", or "as well as"), you MUST segment them. Do not combine them into a single response. Always produce one separate entry in "answers[]" for each distinct question or segment.
+    For example:
+    - User message: "What is the total revenue and how does it compare to last month?" -> MUST split into 2 entries:
+      1) "What is the total revenue?"
+      2) "How does total revenue compare to last month?"
+    - User message: "Compare sales in region A vs B, also show top product." -> MUST split into 2 entries:
+      1) "Compare sales in region A vs B"
+      2) "What is the top product?"
+    Even if there is only one question mark but the message contains multiple distinct requests or parts, segment them completely. This is crucial for returning clear, segmented answers, and generating customized inline charts or spotlit KPIs for each sub-question independently.
+9. Inline Chart-Generation Rule: For each entry in "answers[]", evaluate whether the underlying data is comparative (multiple categories, regions, products, time periods, or an A-vs-B/before-after framing) or trend-like (values across an ordered sequence such as time). If so, and the necessary data points exist in Tier 1 ("dashboard_definition"), Tier 2 ("dataset_context"), or Tier 3 ("knowledge_base") with reasonable confidence, populate "inlineChart" with a real chart spec ("bar" for categorical comparisons, "line"/"area" for time trends, "pie" only for clear share-of-total questions with a small number of categories, generally <=6). If the comparison is qualitative or the confidence in the exact numbers is low (e.g., only available via screenshot OCR), populate "suggestedChart" instead of "inlineChart", and mention in "answerText" that a chart can be generated on request. Never populate both "inlineChart" and "suggestedChart" for the same answer. Do not generate a chart for single-number lookups ("answerType: 'single_kpi'") or for purely explanatory/causal answers with no comparable data points.
+10. Chart Data Grounding Rule: Every value inside "inlineChart.data" or "suggestedChart.data" must come from Tier 1, Tier 2, or Tier 3 sources — never invented or estimated. If numbers must be aggregated from raw rows (Tier 2) to build the chart (e.g., summing revenue by region from "datasetContext.rows"), perform that aggregation accurately and note the aggregation method in "insight" (e.g., 'Sum of order value by region'). Set "sourceOfTruth" to the tier actually used. Cap "data" at 20 categories or 50 time points; if more exist, keep the top 20 by magnitude (or first/last for time series) and say so in "insight".
+11. Backward-Compatibility Rule: If "answers" contains exactly one entry, also populate the legacy top-level fields ("answerText", "answerType", "interpretation", "kpiSpotlight", "sourceElements", "annotationBoxes", "sourcesUsed", "externalContext") to exactly mirror "answers[0]", and additionally populate legacy "miniChartData" as a simplified "{label, value}[]" projection of "answers[0].inlineChart.data" if "answers[0].inlineChart" exists and "answerType === 'trend'". If "answers" has more than one entry, still populate the legacy top-level fields by mirroring "answers[0]" (for any old UI code path that only reads the legacy fields), but preferentially render from "answers[]".
+12. Plain Language & Double-Layered Answer Rule (Show Answer Big, Then Explain It Simply):
+    Every answer (both the legacy top-level format and each sub-answer inside "answers[]") MUST contain BOTH a short, direct, big-font "headline" (for single KPI: the exact number/metric; for comparison: short headline conclusion; for list: the list itself; for others: 1-line plain summary) and a "contextExplanation" (a rich 2-4 sentence plain-language paragraph, about 60-90 words, explaining what the headline means, how it compares, why, or what stands out).
+    Style constraints for "contextExplanation" and "kpiSpotlight.context":
+    - Keep sentences short, clear, and punchy.
+    - ABSOLUTELY NO corporate or office jargon. BANNED words include: "YoY", "MoM", "QoQ", "aggregate", "variance", "delta", "percentile", "outlier", "anomaly", "granular", "benchmark", "KPI".
+    - Instead of jargon, use plain, human-friendly terms: e.g. "compared to last month", "compared to last year", "the odd one out", "how spread out the numbers are", "standard metrics", "key figures", "revenue/money came in".
+    - Explain things simply so a 15-year-old with no business background can easily understand them. Ground all explanations in real dashboard/dataset facts.
+    - "kpiSpotlight.context" must no longer be a thin 1-sentence note; it MUST be a proper, rich 2-4 sentence plain-language explanation matching these exact style constraints.
+13. Suggested Follow-ups Rule: Always populate "suggestedFollowUps" with 2-4 logical, interesting, and diverse follow-up questions that help the user explore the data further. These should be specific to the current context and the answer just provided.
 
 Output perfectly valid JSON matching this schema:
 {
-  "answerText": "standard textual conversational answer",
-  "answerType": "single_kpi | comparison | list | trend | explanation | unavailable",
-  "interpretation": "Interpreting your question as: ...",
+  "answerText": "standard textual conversational answer (overall/summary or mirroring answers[0])",
+  "answerType": "single_kpi | comparison | list | trend | explanation | unavailable (overall or mirroring answers[0])",
+  "interpretation": "Interpreting your question as: ... (overall or mirroring answers[0])",
+  "headline": "short, bold, big-font direct answer (the KPI number, the comparison conclusion, the list itself, or a 1-sentence summary)",
+  "contextExplanation": "rich 2-4 sentence plain-language jargon-free explanation paragraph (60-90 words) directly below the headline",
   "kpiSpotlight": {
     "value": "e.g., ₹4.2 Cr",
     "numericValue": 42000000,
     "unit": "₹ Cr",
     "label": "metric labels like Q3 Net profit",
-    "context": "one-sentence delta description compared to baseline",
+    "context": "rich 2-4 sentence plain-language jargon-free explanation paragraph (60-90 words) matching the style guidelines",
     "trend": "up | down | neutral | null",
     "sourceElementId": "elem_XX",
     "sourceElementTitle": "Exact name of KPI Card",
     "confidence": 0.95
   },
   "miniChartData": [
-    { "label": "Jan", "value": 450000 },
-    { "label": "Feb", "value": 380000 }
+    { "label": "Jan", "value": 450000 }
   ],
   "sourceElements": [
     { "elementId": "elem_XX", "elementType": "kpi_card", "elementTitle": "Widget Title" }
@@ -1260,6 +1037,50 @@ Output perfectly valid JSON matching this schema:
   "suggestedFollowUps": [
     "Suggested question 1",
     "Suggested question 2"
+  ],
+  "sourcesUsed": ["dashboard_dataset", "dashboard_definition", "knowledge_base", "filters", "screenshot", "external_knowledge"],
+  "externalContext": {
+    "used": true,
+    "summary": "plain-language external explanation, or null if not used",
+    "verified": true
+  },
+  "answers": [
+    {
+      "id": "ans_1",
+      "questionText": "verbatim or cleaned question segment this answers",
+      "answerText": "sub-question textual conversational answer",
+      "answerType": "single_kpi | comparison | list | trend | explanation | unavailable",
+      "interpretation": "Interpreting this sub-question as...",
+      "headline": "short, bold, big-font direct answer for this sub-question (the KPI number, the comparison conclusion, the list itself, or a 1-sentence summary)",
+      "contextExplanation": "rich 2-4 sentence plain-language jargon-free explanation paragraph (60-90 words) directly below the headline for this sub-question",
+      "kpiSpotlight": {
+        "value": "e.g., ₹4.2 Cr",
+        "label": "metric label",
+        "trend": "up | down | neutral | null",
+        "context": "rich 2-4 sentence plain-language jargon-free explanation paragraph (60-90 words) matching the style guidelines"
+      },
+      "sourceElements": [],
+      "annotationBoxes": [],
+      "sourcesUsed": ["dashboard_dataset", "dashboard_definition"],
+      "externalContext": {
+        "used": false,
+        "summary": null,
+        "verified": false
+      },
+      "inlineChart": {
+        "id": "chart_ans_1",
+        "title": "Revenue by Region: Q2 vs Q3",
+        "chartType": "bar | line | area | pie",
+        "xKey": "region",
+        "yKeys": ["Q2", "Q3"],
+        "data": [
+          { "region": "North", "Q2": 120000, "Q3": 134000 }
+        ],
+        "insight": "takeaway sentence describing the chart findings",
+        "sourceOfTruth": "dashboard_definition | dashboard_dataset | knowledge_base | screenshot_ocr"
+      },
+      "suggestedChart": null
+    }
   ]
 }`;
 
@@ -1269,9 +1090,26 @@ Output perfectly valid JSON matching this schema:
       // Inject prior conversation context
       if (conversationHistory && Array.isArray(conversationHistory)) {
         conversationHistory.forEach((msg: any) => {
+          let textContent = msg.content || "";
+          if (msg.role === 'analyst' && msg.answers && Array.isArray(msg.answers) && msg.answers.length > 0) {
+            // Include structured sub-answers representation so the model knows what it previously answered in detail
+            textContent = JSON.stringify({
+              answerText: msg.content,
+              answers: msg.answers.map((a: any) => ({
+                id: a.id,
+                questionText: a.questionText,
+                answerText: a.answerText,
+                headline: a.headline,
+                contextExplanation: a.contextExplanation,
+                kpiSpotlight: a.kpiSpotlight,
+                inlineChart: a.inlineChart ? { title: a.inlineChart.title, chartType: a.inlineChart.chartType, insight: a.inlineChart.insight } : null,
+                suggestedChart: a.suggestedChart ? { title: a.suggestedChart.title, chartType: a.suggestedChart.chartType } : null
+              }))
+            });
+          }
           contents.push({
             role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content || "" }]
+            parts: [{ text: textContent }]
           });
         });
       }
@@ -1323,18 +1161,103 @@ Output perfectly valid JSON matching this schema:
       if (active.provider === "gemini") {
         const ai = getGeminiClient();
         const response = await callGeminiWithRetry(async (model) => {
-        return await ai.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
+          return await ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+              responseMimeType: "application/json"
+            }
+          });
         }, "Analyst Chat");
         
-        const ans = JSON.parse(response.text || "{}");
+        const responseText = response.text || "{}";
+        
+        // Robust JSON extraction
+        const jsonText = responseText.replace(/```json\s?/, "").replace(/```\s?/, "").trim();
+        const ans = JSON.parse(jsonText || "{}");
+
+        // Server-side post-validation pass
+        if (!ans.answers || !Array.isArray(ans.answers) || ans.answers.length === 0) {
+          // Synthesize a single-entry array from legacy top-level fields (defensive fallback)
+          ans.answers = [{
+            id: "ans_fallback",
+            questionText: message || "Analyzed Query",
+            answerText: ans.answerText || "",
+            answerType: ans.answerType || "explanation",
+            interpretation: ans.interpretation || "",
+            headline: ans.headline || "",
+            contextExplanation: ans.contextExplanation || "",
+            kpiSpotlight: ans.kpiSpotlight || null,
+            sourceElements: ans.sourceElements || [],
+            annotationBoxes: ans.annotationBoxes || [],
+            sourcesUsed: ans.sourcesUsed || [],
+            externalContext: ans.externalContext || null,
+            inlineChart: null,
+            suggestedChart: null
+          }];
+        }
+
+        // Clean up each sub-answer and ensure headline and contextExplanation exist
+        ans.answers.forEach((sub: any) => {
+          // Enforce inlineChart vs suggestedChart mutual exclusivity
+          if (sub.inlineChart && sub.suggestedChart) {
+            // If both are somehow present, prefer inlineChart and set suggestedChart to null
+            sub.suggestedChart = null;
+          }
+
+          // Defensive caps for chart data lengths (20 categories or 50 points)
+          const capChartData = (chart: any) => {
+            if (chart && Array.isArray(chart.data)) {
+              const cap = 20; // safe cap for chat-width visual
+              if (chart.data.length > cap) {
+                chart.data = chart.data.slice(0, cap);
+                chart.insight = `${chart.insight || ''} (showing top ${cap} categories)`;
+              }
+            }
+          };
+
+          if (sub.inlineChart) capChartData(sub.inlineChart);
+          if (sub.suggestedChart) capChartData(sub.suggestedChart);
+
+          // Fallbacks for sub-answer headline & contextExplanation
+          if (!sub.headline) {
+            if (sub.kpiSpotlight?.value) {
+              sub.headline = `${sub.kpiSpotlight.value}${sub.kpiSpotlight.label ? ` - ${sub.kpiSpotlight.label}` : ""}`;
+            } else if (sub.answerText) {
+              // use first sentence or first 120 chars as headline
+              const idx = sub.answerText.indexOf('.');
+              sub.headline = idx !== -1 ? sub.answerText.substring(0, idx + 1).trim() : sub.answerText;
+            } else {
+              sub.headline = "Insights found";
+            }
+          }
+
+          if (!sub.contextExplanation) {
+            if (sub.kpiSpotlight?.context) {
+              sub.contextExplanation = sub.kpiSpotlight.context;
+            } else {
+              sub.contextExplanation = sub.answerText || "";
+            }
+          }
+
+          if (sub.kpiSpotlight && !sub.kpiSpotlight.context) {
+            sub.kpiSpotlight.context = sub.contextExplanation;
+          }
+        });
+
+        // Sync top-level fields for backwards compatibility and single-answer lookups
+        if (!ans.headline) {
+          ans.headline = ans.answers[0]?.headline || "";
+        }
+        if (!ans.contextExplanation) {
+          ans.contextExplanation = ans.answers[0]?.contextExplanation || ans.answerText || "";
+        }
+        if (ans.kpiSpotlight && !ans.kpiSpotlight.context) {
+          ans.kpiSpotlight.context = ans.contextExplanation;
+        }
+
         res.json({ success: true, ...ans });
       } else {
         res.status(400).json({ error: "Analyst Chat requires Gemini." });

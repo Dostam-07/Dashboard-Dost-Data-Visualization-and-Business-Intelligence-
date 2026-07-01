@@ -102,14 +102,54 @@ export interface CalculatedField {
   description: string;
 }
 
+export interface InlineChartSpec {
+  id: string;
+  title: string;
+  chartType: 'bar' | 'line' | 'area' | 'pie';
+  xKey: string;
+  yKeys: string[];
+  data: Record<string, any>[];
+  insight: string;
+  sourceOfTruth: 'dashboard_definition' | 'dashboard_dataset' | 'knowledge_base' | 'screenshot_ocr';
+}
+
+export interface AnalystSubAnswer {
+  id: string;
+  questionText: string;
+  answerText: string;
+  answerType: 'single_kpi' | 'comparison' | 'list' | 'trend' | 'explanation' | 'unavailable';
+  interpretation: string;
+  headline?: string;
+  contextExplanation?: string;
+  kpiSpotlight?: { value: string; label: string; trend?: string; changePercent?: number; isPositive?: boolean; context?: string } | null;
+  sourceElements?: any[];
+  annotationBoxes?: any[];
+  sourcesUsed: string[];
+  externalContext?: { used: boolean; summary: string | null; verified: boolean } | null;
+  inlineChart: InlineChartSpec | null;
+  suggestedChart: InlineChartSpec | null;
+}
+
 export interface QAMessage {
-  sender: 'user' | 'system';
-  text: string;
+  id?: string;
+  role?: 'user' | 'analyst';
+  content?: string;
+  sender?: 'user' | 'system';
+  text?: string;
   timestamp: string;
   queryDetails?: string; 
   chartData?: any[];
   chartType?: 'bar' | 'kpi' | 'table';
   kpiHighlight?: { value: string; label: string };
+  sourcesUsed?: ('dashboard_dataset' | 'dashboard_definition' | 'knowledge_base' | 'filters' | 'screenshot' | 'external_knowledge')[];
+  externalContext?: { used: boolean; summary: string | null; verified: boolean } | null;
+  suggestedFollowUps?: string[];
+  answerType?: 'single_kpi' | 'comparison' | 'list' | 'trend' | 'explanation' | 'unavailable';
+  kpiSpotlight?: any;
+  miniChartData?: any[] | null;
+  answers?: AnalystSubAnswer[];
+  headline?: string;
+  contextExplanation?: string;
 }
 
 export interface DashboardReport {

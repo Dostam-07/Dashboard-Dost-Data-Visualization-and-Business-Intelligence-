@@ -51,15 +51,37 @@ export interface CrawlerResult {
   routes: string[];
   dashboards: string[];
   pagesDiscovered: string[];
+  captures: any[];
+  domTextData: string[];
+  svgData: any[];
+  tabsDetected: { label: string; index: number }[];
+  pageTitle: string;
+  fullPageScreenshotBase64: string;
 }
 
 export class DashboardCrawlerService {
   private ai: GoogleGenAI | null = null;
+  private domTextSet = new Set<string>();
+  private svgDataSet: any[] = [];
+  private captures: any[] = [];
+  private captureIndex = 0;
+  private totalPagesCaptured = 0;
+  private readonly MAX_PAGES = 15;
+  private readonly MAX_CAPTURES = 40;
+  private readonly viewportHeight = 900;
+  private readonly stepSize = 600;
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      this.ai = new GoogleGenAI({ apiKey });
+      this.ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
     }
   }
 
@@ -111,9 +133,8 @@ ${tablesSample}
 
 Extract all elements accurately into JSON. Do not hallucinate metrics. Use actual numbers and text found above.`;
 
-      // Try gemini-2.5-flash-lite as a fast and cheap structure extractor
       const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-3.5-flash',
         contents: prompt,
         config: {
           systemInstruction,
@@ -123,7 +144,11 @@ Extract all elements accurately into JSON. Do not hallucinate metrics. Use actua
       });
 
       const responseText = response.text || "{}";
-      return JSON.parse(responseText);
+      
+      // Safety: strip markdown code blocks if the model returned them despite responseMimeType
+      const jsonText = responseText.replace(/```json\s?/, "").replace(/```\s?/, "").trim();
+      
+      return JSON.parse(jsonText);
     } catch (err) {
       console.error("Gemini metadata extraction failed, falling back to heuristic:", err);
       return this.heuristicPageMetadata(pageTitle, scrapedTexts);
@@ -160,7 +185,125 @@ Extract all elements accurately into JSON. Do not hallucinate metrics. Use actua
   }
 
   /**
-   * Main crawl function
+   * Scrapes raw text and SVG items from the current viewport
+   */
+  private async scrapeActivePageData(page: any) {
+    try {
+      const texts = await page.evaluate(() => {
+        const list: string[] = [];
+        document.querySelectorAll('text, tspan, .label, .value-label, [class*="chart-value"], [class*="kpi-value"], [class*="metric"], td, th, h1, h2, h3, h4, h5, h6, p, li, span, a').forEach(el => {
+          const txt = (el.textContent || "").trim();
+          if (txt && txt.length > 1 && txt.length < 150) {
+            list.push(txt);
+          }
+        });
+        return list;
+      });
+      texts.forEach(t => this.domTextSet.add(t));
+
+      const svgs = await page.evaluate(() => {
+        const elements: any[] = [];
+        document.querySelectorAll('svg').forEach((svg, idx) => {
+          const svgTexts: string[] = [];
+          svg.querySelectorAll('text, tspan').forEach(t => {
+            const c = (t.textContent || "").trim();
+            if (c.length > 0 && c.length < 100) svgTexts.push(c);
+          });
+          if (svgTexts.length > 0) {
+            elements.push({ labelItems: svgTexts.slice(0, 30) });
+          }
+        });
+        return elements.slice(0, 15);
+      });
+      
+      svgs.forEach(s => {
+        if (!this.svgDataSet.some(existing => JSON.stringify(existing.labelItems) === JSON.stringify(s.labelItems))) {
+          this.svgDataSet.push({ svgIndex: this.svgDataSet.length, labelItems: s.labelItems });
+        }
+      });
+    } catch (err) {
+      console.error("[DashboardCrawlerService] Error scraping viewport segment:", err);
+    }
+  }
+
+  /**
+   * Scrolls and captures screenshots + scrapes data for the current page
+   */
+  private async captureAndScrapeCurrentPage(page: any, pageName: string): Promise<DashboardKnowledgeBasePage> {
+    console.log(`[DashboardCrawlerService] Capturing and scraping: ${pageName}`);
+    
+    const currentUrl = page.url().split('#')[0];
+    const fullHeight = await page.evaluate(() => document.body.scrollHeight || document.documentElement.scrollHeight || 1080);
+    
+    let currentScroll = 0;
+    while (currentScroll < fullHeight && this.captureIndex < this.MAX_CAPTURES) {
+      await page.evaluate((y) => window.scrollTo(0, y), currentScroll);
+      await new Promise(r => setTimeout(r, 1200)); 
+      
+      const base64Buffer = await page.screenshot({ fullPage: false, encoding: 'base64' });
+      this.captures.push({
+        captureIndex: this.captureIndex,
+        scrollPosition: currentScroll,
+        pageNumber: this.totalPagesCaptured + 1,
+        imageBase64: `data:image/png;base64,${base64Buffer}`
+      });
+      
+      this.captureIndex++;
+      await this.scrapeActivePageData(page);
+
+      if (currentScroll + this.viewportHeight >= fullHeight) break;
+      currentScroll += this.stepSize;
+    }
+    this.totalPagesCaptured++;
+
+    // Now extract structured data for the Knowledge Base from this page
+    // We already have domTextData in this.domTextSet and potentially new table data
+    const texts = await page.evaluate(() => {
+      const arr: string[] = [];
+      document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, td, th, li, span, .label, .value, [class*="kpi"], [class*="metric"], [class*="chart-value"]').forEach(el => {
+        const txt = (el.textContent || "").trim();
+        if (txt && txt.length > 1 && txt.length < 200 && !arr.includes(txt)) {
+          arr.push(txt);
+        }
+      });
+      return arr;
+    });
+
+    const tablesScraped = await page.evaluate(() => {
+      const foundTables: any[] = [];
+      document.querySelectorAll('table').forEach((table, tableIdx) => {
+        const headers: string[] = [];
+        const rows: string[][] = [];
+        table.querySelectorAll('th').forEach(th => headers.push((th.textContent || "").trim()));
+        table.querySelectorAll('tr').forEach(tr => {
+          const row: string[] = [];
+          tr.querySelectorAll('td').forEach(td => row.push((td.textContent || "").trim()));
+          if (row.length > 0) rows.push(row);
+        });
+        foundTables.push({
+          tableIdx,
+          title: `Table Segment ${tableIdx + 1}`,
+          headers: headers.length > 0 ? headers : rows[0] || [],
+          rows: headers.length > 0 ? rows : rows.slice(1)
+        });
+      });
+      return foundTables;
+    });
+
+    const parsedMetadata = await this.extractPageMetadata(pageName, texts, tablesScraped);
+
+    return {
+      pageId: `page_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      pageName,
+      charts: parsedMetadata.charts || [],
+      tables: parsedMetadata.tables || tablesScraped.map(t => ({ title: t.title, headers: t.headers, rows: t.rows, summary: "" })),
+      kpis: parsedMetadata.kpis || [],
+      filters: parsedMetadata.filters || []
+    };
+  }
+
+  /**
+   * Main crawl function - Consolidates all navigation and capture into a single pass
    */
   public async crawl(
     url: string, 
@@ -168,7 +311,7 @@ Extract all elements accurately into JSON. Do not hallucinate metrics. Use actua
     credentials?: { username: string; password: string } | null,
     sessionCookies?: any[] | null
   ): Promise<CrawlerResult> {
-    console.log(`[DashboardCrawlerService] Starting full crawl of URL: ${url}`);
+    console.log(`[DashboardCrawlerService] Starting consolidated crawl of URL: ${url}`);
     
     const ownsBrowser = !browserInstance;
     const browser = browserInstance || await puppeteer.launch({
@@ -180,124 +323,89 @@ Extract all elements accurately into JSON. Do not hallucinate metrics. Use actua
     const routes: string[] = [];
     const dashboards: string[] = [];
     const kbPages: DashboardKnowledgeBasePage[] = [];
+    const visitedUrls = new Set<string>();
+    const discoveredLinksSet = new Set<string>();
+    const tabsDetected: { label: string; index: number }[] = [];
+    let pageTitle = "Dashboard Portal";
+    let fullPageScreenshotBase64 = "";
 
     try {
       const page = await browser.newPage();
       await page.setViewport({ width: 1440, height: 900 });
 
-      // Inject session cookies if supplied
       if (sessionCookies && Array.isArray(sessionCookies)) {
-        console.log("[DashboardCrawlerService] Applying session cookies to page instance...");
-        try {
-          await page.setCookie(...sessionCookies);
-        } catch (cookieErr) {
-          console.error("[DashboardCrawlerService] Failed to set cookies:", cookieErr);
-        }
+        await page.setCookie(...sessionCookies).catch(e => console.error("[DashboardCrawlerService] Cookie error:", e));
       }
 
-      // Navigate to main URL
       let validUrl = url.trim();
       if (!validUrl.startsWith("http://") && !validUrl.startsWith("https://")) {
         validUrl = "https://" + validUrl;
       }
       validUrl = validUrl.replace("https//:", "https://").replace("http//:", "http://");
-      validUrl = validUrl.replace("https://https://", "https://").replace("http://http://", "http://");
-
+      
       try {
         await page.goto(validUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       } catch (e) {
-        console.warn(`[DashboardCrawlerService] Goto timeout or error, proceeding anyway: ${e}`);
+        console.warn(`[DashboardCrawlerService] Initial navigation warning: ${e}`);
       }
 
       await new Promise(r => setTimeout(r, 2000));
+      pageTitle = await page.title() || "Dashboard Portal";
 
-      // Auth Page Analysis
+      // Auth logic
       const authState = await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
         const hasPasswordField = document.querySelector('input[type="password"]') !== null;
-        const hasLoginForm = document.querySelector('form[action*="login"], form[action*="auth"], form[action*="signin"]') !== null;
-        const hasLoginKeywords = ['sign in', 'log in', 'enter password', 'username', 'email address', 'passward'].some(k => bodyText.includes(k));
-        const currentUrl = window.location.href;
-        const isLoginUrl = ['/login', '/signin', '/auth', '/sso'].some(p => currentUrl.includes(p));
-        
-        return {
-          requiresAuth: hasPasswordField || hasLoginForm || (hasLoginKeywords && isLoginUrl),
-          hasPasswordField,
-          currentUrl,
-          loginFormExists: hasLoginForm
-        };
+        const hasLoginKeywords = ['sign in', 'log in', 'username', 'email address'].some(k => bodyText.includes(k));
+        return { requiresAuth: hasPasswordField || hasLoginKeywords };
       });
 
       if (authState.requiresAuth && credentials) {
-        console.log("[DashboardCrawlerService] Injecting credentials and trying to authenticate...");
-        try {
-          await page.evaluate((creds) => {
-            const userInputs = document.querySelectorAll('input[type="email"], input[type="text"], input[name*="user"], input[name*="email"], input[id*="user"]');
-            const passInputs = document.querySelectorAll('input[type="password"]');
-            
-            if (userInputs.length > 0 && creds.username) {
-              const uEl = userInputs[0] as HTMLInputElement;
-              uEl.value = creds.username;
-              uEl.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            if (passInputs.length > 0 && creds.password) {
-              const pEl = passInputs[0] as HTMLInputElement;
-              pEl.value = creds.password;
-              pEl.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-          }, credentials);
+        await page.evaluate((creds) => {
+          const userInputs = document.querySelectorAll('input[type="email"], input[type="text"], input[name*="user"]');
+          const passInputs = document.querySelectorAll('input[type="password"]');
+          if (userInputs.length > 0 && creds.username) {
+            (userInputs[0] as HTMLInputElement).value = creds.username;
+            userInputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          if (passInputs.length > 0 && creds.password) {
+            (passInputs[0] as HTMLInputElement).value = creds.password;
+            passInputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }, credentials);
 
-          await page.evaluate(() => {
-            const submitBtn = document.querySelector('button[type="submit"], input[type="submit"], .btn-primary, button.login');
-            if (submitBtn) {
-              (submitBtn as HTMLElement).click();
-            } else {
-              const forms = document.querySelectorAll('form');
-              if (forms.length > 0) {
-                forms[0].submit();
-              }
-            }
-          });
-
-          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-          await new Promise(r => setTimeout(r, 2000));
-        } catch (loginErr: any) {
-          console.error("[DashboardCrawlerService] Login attempt exception:", loginErr);
-        }
-      }
-
-      const mainTitle = await page.title() || "Dashboard Portal";
-      pagesDiscovered.push(mainTitle);
-
-      // --- PAGE & ROUTE DISCOVERY ENGINE ---
-      // 1. Scan for internal links & navigation links
-      const discoveredLinks = await page.evaluate(() => {
-        const list: { href: string; label: string }[] = [];
-        const baseOrigin = window.location.origin;
-        const currentHref = window.location.href.split('#')[0];
-
-        document.querySelectorAll('a').forEach(a => {
-          const href = a.href.split('#')[0];
-          const label = (a.textContent || "").trim();
-          if (href && href.startsWith(baseOrigin) && href !== currentHref && label.length > 1 && label.length < 50) {
-            if (!list.some(item => item.href === href)) {
-              list.push({ href, label });
-            }
+        await page.evaluate(() => {
+          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"], .btn-primary');
+          if (submitBtn) (submitBtn as HTMLElement).click();
+          else {
+            const forms = document.querySelectorAll('form');
+            if (forms.length > 0) forms[0].submit();
           }
         });
-        return list;
+
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 2000));
+        pageTitle = await page.title() || pageTitle;
+      }
+
+      // Initial Link & Tab Discovery
+      const initialLinks = await page.evaluate(() => {
+        const baseOrigin = window.location.origin;
+        return Array.from(document.querySelectorAll('a'))
+          .map(a => ({ href: a.href.split('#')[0], label: (a.textContent || "").trim() }))
+          .filter(item => item.href.startsWith(baseOrigin) && item.label.length > 1 && item.label.length < 50);
       });
 
-      discoveredLinks.forEach(link => {
-        routes.push(link.href);
-        dashboards.push(link.label);
+      initialLinks.forEach(link => {
+        discoveredLinksSet.add(link.href);
+        if (!routes.includes(link.href)) {
+          routes.push(link.href);
+          dashboards.push(link.label);
+        }
       });
 
-      // Get dynamic platform-specific selectors
-      const selectorsToUse = getPlatformSelectors(validUrl, mainTitle);
-
-      // 2. Scan for physical clickable tab elements using custom platform selectors
-      const tabsDetected = await page.evaluate((selectors) => {
+      const selectorsToUse = getPlatformSelectors(validUrl, pageTitle);
+      const initialTabs = await page.evaluate((selectors) => {
         const found: string[] = [];
         selectors.forEach(sel => {
           document.querySelectorAll(sel).forEach(el => {
@@ -310,144 +418,113 @@ Extract all elements accurately into JSON. Do not hallucinate metrics. Use actua
         return found;
       }, selectorsToUse);
 
-      console.log(`[DashboardCrawlerService] Discovered ${discoveredLinks.length} navigation links and ${tabsDetected.length} clickable tabs.`);
+      initialTabs.forEach((label, idx) => tabsDetected.push({ label, index: idx }));
 
-      // --- CRAWLER & SCRAPER STATE ---
-      const visitedUrls = new Set<string>();
-      visitedUrls.add(validUrl);
-
-      // Scrape data helper for current viewport
-      const scrapeCurrentViewData = async (currentPageName: string): Promise<DashboardKnowledgeBasePage> => {
-        console.log(`[DashboardCrawlerService] Scaping data for page: ${currentPageName}`);
-
-        // Scrape text content
-        const texts = await page.evaluate(() => {
-          const arr: string[] = [];
-          document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, td, th, li, span, .label, .value, [class*="kpi"], [class*="metric"], [class*="chart-value"]').forEach(el => {
-            const txt = (el.textContent || "").trim();
-            if (txt && txt.length > 1 && txt.length < 200 && !arr.includes(txt)) {
-              arr.push(txt);
-            }
-          });
-          return arr;
-        });
-
-        // Scrape tabular blocks
-        const tablesScraped = await page.evaluate(() => {
-          const foundTables: any[] = [];
-          document.querySelectorAll('table').forEach((table, tableIdx) => {
-            const headers: string[] = [];
-            const rows: string[][] = [];
-            
-            table.querySelectorAll('th').forEach(th => {
-              headers.push((th.textContent || "").trim());
-            });
-
-            table.querySelectorAll('tr').forEach(tr => {
-              const row: string[] = [];
-              tr.querySelectorAll('td').forEach(td => {
-                row.push((td.textContent || "").trim());
-              });
-              if (row.length > 0) {
-                rows.push(row);
-              }
-            });
-
-            foundTables.push({
-              tableIdx,
-              title: `Table Segment ${tableIdx + 1}`,
-              headers: headers.length > 0 ? headers : rows[0] || [],
-              rows: headers.length > 0 ? rows : rows.slice(1)
-            });
-          });
-          return foundTables;
-        });
-
-        // Use Gemini metadata extraction for semantic page translation!
-        const parsedMetadata = await this.extractPageMetadata(currentPageName, texts, tablesScraped);
-
-        return {
-          pageId: `page_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          pageName: currentPageName,
-          charts: parsedMetadata.charts || [],
-          tables: parsedMetadata.tables || tablesScraped.map(t => ({ title: t.title, headers: t.headers, rows: t.rows, summary: "" })),
-          kpis: parsedMetadata.kpis || [],
-          filters: parsedMetadata.filters || []
-        };
-      };
-
-      // 1. Scrape original page
-      const mainPageData = await scrapeCurrentViewData(mainPageTitleOrLabel(mainTitle));
+      // --- PASS 1: Main Page ---
+      const mainPageData = await this.captureAndScrapeCurrentPage(page, mainPageTitleOrLabel(pageTitle));
       kbPages.push(mainPageData);
+      pagesDiscovered.push(mainPageData.pageName);
+      visitedUrls.add(page.url().split('#')[0]);
 
-      // 2. Sequentially click and scrape tabs (up to 10 tabs to respect budget and limits)
-      const tabsToCrawl = tabsDetected.slice(0, 10);
-      for (let i = 0; i < tabsToCrawl.length; i++) {
-        const tabName = tabsToCrawl[i];
-        console.log(`[DashboardCrawlerService] Attempting tab click crawl on: ${tabName}`);
+      // Take master screenshot
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const masterScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+      fullPageScreenshotBase64 = `data:image/png;base64,${masterScreenshot}`;
+
+      // --- PASS 2: Sequential Tabs ---
+      const tabsToCrawl = initialTabs.slice(0, 10);
+      for (const tabName of tabsToCrawl) {
+        if (this.totalPagesCaptured >= this.MAX_PAGES || this.captureIndex >= this.MAX_CAPTURES) break;
         
-        const clicked = await page.evaluate((labelName, selectors) => {
-          let foundEl: HTMLElement | null = null;
+        let clicked = await page.evaluate((labelName, selectors) => {
           for (const sel of selectors) {
             const els = Array.from(document.querySelectorAll(sel));
             const match = els.find(el => (el.textContent || "").trim() === labelName);
-            if (match) {
-              foundEl = match as HTMLElement;
-              break;
-            }
-          }
-          if (foundEl) {
-            foundEl.click();
-            return true;
+            if (match) { (match as HTMLElement).click(); return true; }
           }
           return false;
         }, tabName, selectorsToUse);
 
+        if (!clicked) {
+          try {
+            await page.goto(validUrl, { waitUntil: 'networkidle2', timeout: 15000 });
+            clicked = await page.evaluate((labelName, selectors) => {
+              for (const sel of selectors) {
+                const els = Array.from(document.querySelectorAll(sel));
+                const match = els.find(el => (el.textContent || "").trim() === labelName);
+                if (match) { (match as HTMLElement).click(); return true; }
+              }
+              return false;
+            }, tabName, selectorsToUse);
+          } catch (e) {}
+        }
+
         if (clicked) {
-          await new Promise(r => setTimeout(r, 2500)); // wait for dynamic graphs/charts load
-          const tabData = await scrapeCurrentViewData(tabName);
+          await new Promise(r => setTimeout(r, 2500));
+          const tabData = await this.captureAndScrapeCurrentPage(page, tabName);
           kbPages.push(tabData);
           pagesDiscovered.push(tabName);
+          visitedUrls.add(page.url().split('#')[0]);
         }
       }
 
-      // 3. Sequentially navigate to other links (if they are under same domain)
-      const linksToCrawl = discoveredLinks.filter(item => !visitedUrls.has(item.href)).slice(0, 5);
-      for (const item of linksToCrawl) {
-        console.log(`[DashboardCrawlerService] Navigating to sub-link crawl: ${item.href}`);
+      // --- PASS 3: Same-Domain Links ---
+      const linksToCrawl = Array.from(discoveredLinksSet)
+        .filter(href => !visitedUrls.has(href))
+        .slice(0, 5);
+
+      for (const href of linksToCrawl) {
+        if (this.totalPagesCaptured >= this.MAX_PAGES || this.captureIndex >= this.MAX_CAPTURES) break;
         try {
-          await page.goto(item.href, { waitUntil: 'networkidle2', timeout: 15000 });
-          visitedUrls.add(item.href);
+          await page.goto(href, { waitUntil: 'networkidle2', timeout: 15000 });
           await new Promise(r => setTimeout(r, 2000));
-          
-          const title = await page.title() || item.label;
-          const subPageData = await scrapeCurrentViewData(title);
+          const title = await page.title() || "Sub Page";
+          const subPageData = await this.captureAndScrapeCurrentPage(page, title);
           kbPages.push(subPageData);
           pagesDiscovered.push(title);
-        } catch (err) {
-          console.warn(`[DashboardCrawlerService] Failed to navigate/scrape link ${item.href}: ${err}`);
-        }
+          visitedUrls.add(href);
+        } catch (e) {}
+      }
+
+      // --- PASS 4: Pagination ---
+      while (this.totalPagesCaptured < this.MAX_PAGES && this.captureIndex < this.MAX_CAPTURES) {
+        const hasNextPage = await page.evaluate(() => {
+          const btnSelectors = ['.pagination-next', '[aria-label="Next"]', 'button.next', 'a.next'];
+          let targetBtn: HTMLElement | null = null;
+          for (const sel of btnSelectors) {
+            const btn = document.querySelector(sel) as HTMLElement;
+            if (btn && !btn.hasAttribute('disabled') && !btn.className.includes('disabled')) {
+              targetBtn = btn; break;
+            }
+          }
+          if (targetBtn) { targetBtn.click(); return true; }
+          return false;
+        });
+
+        if (hasNextPage) {
+          await new Promise(r => setTimeout(r, 3000));
+          const pageData = await this.captureAndScrapeCurrentPage(page, `Page ${this.totalPagesCaptured + 1}`);
+          kbPages.push(pageData);
+          pagesDiscovered.push(pageData.pageName);
+        } else break;
       }
 
       await page.close();
     } catch (e) {
-      console.error("[DashboardCrawlerService] Exception during crawling process:", e);
+      console.error("[DashboardCrawlerService] Crawl failed:", e);
     } finally {
-      if (ownsBrowser) {
-        await browser.close();
-      }
+      if (ownsBrowser) await browser.close();
     }
 
     return {
-      knowledgeBase: {
-        dashboardId: `kb_${Date.now()}`,
-        pages: kbPages,
-        routes: routes,
-        dashboards: dashboards
-      },
-      routes,
-      dashboards,
-      pagesDiscovered
+      knowledgeBase: { dashboardId: `kb_${Date.now()}`, pages: kbPages, routes, dashboards },
+      routes, dashboards, pagesDiscovered,
+      captures: this.captures,
+      domTextData: Array.from(this.domTextSet).slice(0, 500),
+      svgData: this.svgDataSet.slice(0, 40),
+      tabsDetected,
+      pageTitle,
+      fullPageScreenshotBase64
     };
   }
 }
