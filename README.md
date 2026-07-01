@@ -1,4 +1,4 @@
-# ⚡ Dash-Dost: Conversational Analytics & Interactive Dashboard Builder
+# ⚡ Dash-Dost: Conversational Analytics & Intelligent Dashboard Analyst
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/dostam/dash-dost)
 [![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -6,60 +6,28 @@
 [![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=flat&logo=vite&logoColor=white)](https://vite.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Google Gemini API](https://img.shields.io/badge/Google_Gemini-8E75C2?style=flat&logo=google-gemini&logoColor=white)](https://ai.google.dev/)
-[![Puppeteer](https://img.shields.io/badge/puppeteer-%2304d414.svg?style=flat&logo=puppeteer&logoColor=white)](https://pptr.dev/)
 
-> **Your Raw Data, Transformed Conversationally.** Turn messy, chaotic CSVs, Excel sheets, and static live dashboards into professional, highly interactive, and beautifully composed visual workspaces in seconds. Powered by Google Gemini and a robust client-side fuzzy data-binding engine.
+> **The Universal Dashboard Analyst.** Turn static live dashboards and visual telemetry snapshots into professional, highly interactive, and beautifully composed visual reasoning workspaces. Powered by Google Gemini multimodal intelligence.
 
 ---
 
 ## 🌟 Overview
 
-**Dash-Dost** (Dashboard Friend) is a modern, full-stack conversational analytics workspace that breaks down the barrier between raw data and business intelligence. Instead of constructing tedious pivot tables, writing complex SQL queries, or dealing with rigid layouts, you simply talk to your data.
+**Dash-Dost** (Dashboard Friend) is a modern, full-stack conversational analytics analyst that breaks down the barrier between complex dashboards and actionable intelligence. Instead of manually parsing rigid layouts or construction spreadsheets, you simply talk to your dashboard.
 
-Dash-Dost handles the entire analytics lifecycle: it profiles dataset columns, normalizes messy values, matches fuzzy queries to actual dataset headers, generates responsive bento-grid layouts, and supports conversational deep dives with a grounded virtual analyst. If you need immediate results without AI latency, the **⚡ Quick View** engine bypasses the network entirely, mapping numerical, categorical, and chronological metrics into interactive charts in **under 100 milliseconds**.
-
----
-
-## 📖 Table of Contents
-
-- [⚡ Dash-Dost: Conversational Analytics \& Interactive Dashboard Builder](#-dash-dost-conversational-analytics--interactive-dashboard-builder)
-  - [🌟 Overview](#-overview)
-  - [📖 Table of Contents](#-table-of-contents)
-  - [✨ Key Features](#-key-features)
-  - [🏗️ System Architecture \& Data Flow](#️-system-architecture--data-flow)
-  - [🛠️ Tech Stack \& Dependencies](#️-tech-stack--dependencies)
-  - [📂 Project Structure](#-project-structure)
-  - [🚀 Getting Started](#-getting-started)
-    - [Prerequisites](#prerequisites)
-    - [Installation \& Configuration](#installation--configuration)
-    - [Environment Variables](#environment-variables)
-    - [Running the Development Server](#running-the-development-server)
-    - [Production Build \& Execution](#production-build--execution)
-    - [Available Scripts](#available-scripts)
-  - [🔌 API Reference](#-api-reference)
-  - [🧠 AI \& LLM Architecture](#-ai--llm-architecture)
-    - [Tiered Grounding Hierarchy](#tiered-grounding-hierarchy)
-    - [Multi-Intent Segmentation Rule](#multi-intent-segmentation-rule)
-    - [Inline Ephemeral Chart Spec Generation](#inline-ephemeral-chart-spec-generation)
-  - [📸 UI Tour / Placeholders](#-ui-tour--placeholders)
-  - [🧪 Code Quality \& Validation](#-code-quality--validation)
-  - [🤝 Contributing](#-contributing)
-  - [📜 License](#-license)
-  - [💖 Acknowledgements](#-acknowledgements)
+The application specializes in **Dashboard Ingestion & Analysis**: it crawls live dashboard portals (Tableau, Looker, PowerBI, etc.), traverses their tab hierarchies, extracts text and visual telemetry, and builds a grounded intelligence report. You can then deep-dive into the data using a conversational analyst that highlights source anchors directly on your telemetry stream.
 
 ---
 
 ## ✨ Key Features
 
-*   **💬 Conversational Dashboard Synthesis**: Describe what you want to visualize in plain English (e.g., *"Show me total revenue as a KPI, a line chart of sales over time, and a bar chart of regions"*). Dash-Dost generates beautiful layouts containing bound, responsive Recharts widgets.
-*   **⚡ Zero-LLM "Quick View" Mode**: Skip AI roundtrips. A powerful client-side heuristic engine analyzes data shapes, categories, and numerical metrics to build a comprehensive, ready-to-use dashboard in milliseconds.
-*   **🧩 High-Fidelity Multi-Intent Q&A**: Enter compound questions like *"What's our Q3 revenue? Also compare region A vs B, and why did churn drop?"* The virtual analyst segments these into independent queries, returning a tailored, multi-card answer layout with distinct sources and KPIs.
-*   **📊 Inline Chat-Only Ephemeral Charts**: Sub-answers with comparative or trend-based metrics automatically generate line, bar, area, or pie charts rendered *inside the chat bubble*. These charts are ephemeral and do not clutter your live dashboard until you click **"📊 Show as Chart"** or promote them.
-*   **🕷️ Browser-Based Deep Dashboard Crawler**: Input any public or authenticated dashboard URL. Dash-Dost spins up a server-side headless browser (Puppeteer) to crawl through up to 15 tabs and sub-pages, bypass loading states, scroll dynamically to trigger charts, and aggregate text and visual intelligence.
-*   **🖼️ Screenshot Intelligence OCR**: Drop a visual capture of any existing dashboard or spreadsheet. The system extracts tabular data, coordinates UI widgets, identifies trends, and produces a highly accurate visual markdown dossier.
-*   **🔗 Intelligent Fuzzy Data Binder**: Standardizes loose column references from LLM payloads (e.g., `"revenue"`, `"sales"`) against actual, complex spreadsheet columns (e.g., `"Net Revenue (USD)"` or `"Sales_Q2_Final"`), using fuzzy matching and semantic mapping.
-*   **🛡️ KPI Guardrails \& Safe Aggregations**: KPI cards automatically handle noisy string formatted values (like `$`, `%`, commas, or missing cells). If no numeric aggregation is possible, cards fall back to standard counts or row counts gracefully.
-*   **🍰 High-Cardinality Pie Chart Clamping**: Protects pie charts from rendering unreadable, micro-sized slices. It automatically ranks values and groups lower-frequency entries into an *"Other"* category once slices exceed 8.
+*   **🕵️ Deep Dashboard Crawler**: Input any public or authenticated dashboard URL. Dash-Dost spins up a server-side headless browser (Puppeteer) to crawl through tabs and sub-pages, bypass loading states, scroll dynamically, and aggregate deep intelligence.
+*   **🖼️ Visual Intelligence OCR**: Upload a visual capture of any dashboard or spreadsheet. The system extracts tabular data, coordinates UI widgets, and identifies trends using Gemini vision models.
+*   **💬 Grounded Conversational Q&A**: Enter compound questions about your telemetry. The virtual analyst segments queries, returning tailored, multi-card answer layouts with distinct sources and interactive KPI spotlights.
+*   **🧩 Side-by-Side Comparison**: Compare two different dashboard snapshots or historical captures side-by-side to detect trends, anomalies, and structural drift over time.
+*   **📊 Inline Ephemeral Charts**: Comparative or chronological answers automatically generate line, bar, area, or pie charts rendered *inside the chat bubble* for immediate visual proof.
+*   **🌗 Adaptive Design Language**: A meticulously crafted **Swiss/Modern** interface that transitions seamlessly between high-contrast Light and deep Cosmic Dark themes.
+*   **🛡️ Multi-Source Grounding**: Responses are grounded across four distinct layers: Dashboard Series data, Dataset context, Crawled Knowledge Base text, and Visual OCR evidence.
 
 ---
 
@@ -74,45 +42,26 @@ graph TD
     %% Frontend Group
     subgraph Frontend [React Client-Side]
         App[App.tsx / Global State]
-        Analyst[AnalystView.tsx / Chat Sidebar]
-        Dashboard[ChartWrapper.tsx / Bento Layout]
-        QuickView[simpleDashboardBuilder.ts / Local Heuristics]
+        Analyst[AnalystView.tsx / Ingestion & Chat]
+        ImageViewer[ImageViewer.tsx / Spotlight Rendering]
     end
     
     %% Backend Group
     subgraph Backend [Express Server-Side]
         Server[server.ts]
-        Crawler[DashboardCrawlerService.ts / Headless Puppeteer]
+        Crawler[DashboardCrawlerService.ts / Puppeteer]
         Gemini[Google @google/genai SDK]
     end
     
-    %% External Services Group
-    subgraph Externals [External Systems]
-        LLM[Google Gemini Models]
-        RemoteDash[Target Remote URL]
-    end
-
     %% Interactions
-    User -->|Upload CSV/XLSX| App
-    User -->|Asks Complex Questions| Analyst
-    User -->|Clicks Quick View| QuickView
-    
-    QuickView -->|Instant Layout Specs| Dashboard
-    App -->|Sends Raw Data & Prompt| Server
-    Analyst -->|Sends Chat & History| Server
-    
-    Server -->|Direct Request| Gemini
-    Crawler -->|Navigates, clicks, scrolls tabs| RemoteDash
-    RemoteDash -->|Rendered Content / Text / Images| Crawler
-    
-    Crawler -->|Scraped Knowledge Base & Snapshot| Server
-    Gemini -->|Prompt + Context Specs| LLM
-    LLM -->|Structured JSON Response| Gemini
-    
-    Gemini -->|Segmented Answers & Chart Specs| Analyst
-    Server -->|Layout Payloads & Binding Configs| App
-    
-    Dashboard -->|Binds Data to Recharts| App
+    User -->|Paste URL / Upload| Analyst
+    Analyst -->|Ingestion Request| Server
+    Server -->|Crawl & Screenshot| Crawler
+    Crawler -->|Raw Telemetry & Images| Server
+    Server -->|Multimodal Reasoning| Gemini
+    Gemini -->|Intelligence Report| Analyst
+    Analyst -->|Conversational Q&A| Gemini
+    Analyst -->|Visual Anchors| ImageViewer
 ```
 
 ---

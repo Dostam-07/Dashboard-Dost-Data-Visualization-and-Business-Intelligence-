@@ -127,7 +127,7 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((setState, getState) => ({
-  appMode: 'build',
+  appMode: 'analyze',
   setAppMode: (mode) => setState({ appMode: mode }),
 
   activeSpotlight: null,

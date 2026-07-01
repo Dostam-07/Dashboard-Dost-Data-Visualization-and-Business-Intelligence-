@@ -72,6 +72,7 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   associatedPayload?: MasterDashboardPayload; // Optional link to a specific dashboard state
+  suggestedFollowUps?: string[];
 }
 
 export interface SavedDashboardMeta {

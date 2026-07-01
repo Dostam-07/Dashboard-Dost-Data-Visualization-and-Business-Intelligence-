@@ -599,16 +599,21 @@ export const ConversationalPanel: React.FC<ConversationalPanelProps> = ({
       <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-zinc-900/80 bg-white/80 dark:bg-zinc-950/80 relative shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="mb-3">
           <div className="flex items-center gap-1.5 mb-2">
-            <span className="text-xs font-sans text-slate-500 dark:text-zinc-400 block font-medium">Try an example:</span>
+            <span className="text-xs font-sans text-slate-500 dark:text-zinc-400 block font-medium">
+              {chats.length > 0 && chats[chats.length - 1].role === 'assistant' && chats[chats.length - 1].suggestedFollowUps ? 'Suggested Follow-ups:' : 'Try an example:'}
+            </span>
           </div>
-          <SuggestionChips onSelected={(promptText) => {
-            setInput(promptText);
-            if (textAreaRef.current) {
-              setTimeout(() => {
-                textAreaRef.current?.focus();
-              }, 50);
-            }
-          }} />
+          <SuggestionChips 
+            suggestions={chats.length > 0 && chats[chats.length - 1].role === 'assistant' ? chats[chats.length - 1].suggestedFollowUps : undefined}
+            onSelected={(promptText) => {
+              setInput(promptText);
+              if (textAreaRef.current) {
+                setTimeout(() => {
+                  textAreaRef.current?.focus();
+                }, 50);
+              }
+            }} 
+          />
         </div>
 
         {useAppStore.getState().attachedData && (

@@ -10,6 +10,15 @@ import fs from "fs";
 import puppeteer from "puppeteer";
 import { DashboardCrawlerService, getPlatformSelectors } from "./src/services/DashboardCrawlerService";
 
+// Job store for asynchronous ingestion
+const ingestionJobs = new Map<string, {
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  result?: any;
+  error?: string;
+  progress: number;
+  message: string;
+}>();
+
 dotenv.config();
 
 const isProd = process.env.NODE_ENV === "production";
@@ -76,7 +85,7 @@ const getOllamaClient = () => {
 const callGeminiWithRetry = async (
   modelFactory: (model: string) => Promise<any>,
   operationName: string,
-  models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"],
+  models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
   retriesPerModel = 2,
   baseDelay = 2000 // Increased base delay to help with rate limits
 ) => {
@@ -555,105 +564,135 @@ Core Operations Directives:
       return res.status(400).json({ error: "URL is required" });
     }
 
-    try {
-      console.log(`Ingesting dashboard URL via Puppeteer: ${url}`);
-      
-      const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'],
-        headless: true
-      });
-      const page = await browser.newPage();
-      await page.setViewport({ width: viewportWidth || 1440, height: 900 });
-      
-      // Inject session cookies if supplied
-      if (sessionCookies && Array.isArray(sessionCookies)) {
-        console.log("Applying session cookies to page instance...");
-        try {
-          await page.setCookie(...sessionCookies);
-        } catch (cookieErr) {
-          console.error("Failed to set cookies:", cookieErr);
-        }
-      }
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    ingestionJobs.set(jobId, { status: 'pending', progress: 0, message: 'Initializing ingestion...' });
 
-      // 1. Initial navigation
-      let validUrl = url.trim();
-      if (!validUrl.startsWith("http://") && !validUrl.startsWith("https://")) {
-        validUrl = "https://" + validUrl;
-      }
-      validUrl = validUrl.replace("https//:", "https://").replace("http//:", "http://");
-      validUrl = validUrl.replace("https://https://", "https://").replace("http://http://", "http://");
+    // Return job ID immediately
+    res.json({ success: true, jobId });
 
+    // Process in background
+    (async () => {
+      let browser: any = null;
       try {
-        await page.goto(validUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-      } catch (e) {
-        console.warn(`Page goto timeout or error for ${validUrl}, continuing anyway...`);
-      }
-      
-      await new Promise(r => setTimeout(r, 2000));
-
-      // 2. Auth Page Analysis
-      const authState = await page.evaluate(() => {
-        const bodyText = document.body.innerText.toLowerCase();
-        const hasPasswordField = document.querySelector('input[type="password"]') !== null;
-        const hasLoginForm = document.querySelector('form[action*="login"], form[action*="auth"], form[action*="signin"]') !== null;
-        const hasLoginKeywords = ['sign in', 'log in', 'enter password', 'username', 'email address', 'passward'].some(k => bodyText.includes(k));
-        const currentUrl = window.location.href;
-        const isLoginUrl = ['/login', '/signin', '/auth', '/sso'].some(p => currentUrl.includes(p));
+        console.log(`[Async Job ${jobId}] Ingesting dashboard URL: ${url}`);
+        ingestionJobs.set(jobId, { ...ingestionJobs.get(jobId)!, status: 'processing', progress: 10, message: 'Launching browser...' });
         
-        return {
-          requiresAuth: hasPasswordField || hasLoginForm || (hasLoginKeywords && isLoginUrl),
-          hasPasswordField,
-          currentUrl,
-          loginFormExists: hasLoginForm
-        };
-      });
-
-      // If auth is required, and no credentials were submitted yet, return the auth modal signal
-      if (authState.requiresAuth && !credentials) {
-        await browser.close();
-        return res.json({
-          success: false,
-          requiresAuth: true,
-          authType: "form",
-          loginUrl: url,
-          message: "This dashboard requires authentication. Please provide credentials to proceed."
+        browser = await puppeteer.launch({
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'],
+          headless: true
         });
+        const page = await browser.newPage();
+        await page.setViewport({ width: viewportWidth || 1440, height: 900 });
+        
+        if (sessionCookies && Array.isArray(sessionCookies)) {
+          try {
+            await page.setCookie(...sessionCookies);
+          } catch (cookieErr) {
+            console.error("Failed to set cookies:", cookieErr);
+          }
+        }
+
+        let validUrl = url.trim();
+        if (!validUrl.startsWith("http://") && !validUrl.startsWith("https://")) {
+          validUrl = "https://" + validUrl;
+        }
+        validUrl = validUrl.replace("https//:", "https://").replace("http//:", "http://");
+        validUrl = validUrl.replace("https://https://", "https://").replace("http://http://", "http://");
+
+        ingestionJobs.set(jobId, { ...ingestionJobs.get(jobId)!, progress: 30, message: `Navigating to ${validUrl}...` });
+        try {
+          await page.goto(validUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+        } catch (e) {
+          console.warn(`Page goto timeout or error for ${validUrl}, continuing...`);
+        }
+        
+        await new Promise(r => setTimeout(r, 2000));
+
+        const authState = await page.evaluate(() => {
+          const bodyText = document.body.innerText.toLowerCase();
+          const hasPasswordField = document.querySelector('input[type="password"]') !== null;
+          const hasLoginForm = document.querySelector('form[action*="login"], form[action*="auth"], form[action*="signin"]') !== null;
+          const hasLoginKeywords = ['sign in', 'log in', 'enter password', 'username', 'email address', 'passward'].some(k => bodyText.includes(k));
+          const currentUrl = window.location.href;
+          const isLoginUrl = ['/login', '/signin', '/auth', '/sso'].some(p => currentUrl.includes(p));
+          
+          return {
+            requiresAuth: hasPasswordField || hasLoginForm || (hasLoginKeywords && isLoginUrl),
+            hasPasswordField,
+            currentUrl,
+            loginFormExists: hasLoginForm
+          };
+        });
+
+        if (authState.requiresAuth && !credentials) {
+          ingestionJobs.set(jobId, {
+            status: 'completed',
+            progress: 100,
+            message: 'Authentication required',
+            result: {
+              requiresAuth: true,
+              authType: "form",
+              loginUrl: url,
+              message: "This dashboard requires authentication. Please provide credentials to proceed."
+            }
+          });
+          await browser.close();
+          return;
+        }
+
+        ingestionJobs.set(jobId, { ...ingestionJobs.get(jobId)!, progress: 60, message: 'Initiating semantic crawler...' });
+        const crawlerService = new DashboardCrawlerService();
+        const crawlResult = await crawlerService.crawl(
+          validUrl,
+          browser,
+          credentials || null,
+          sessionCookies || null
+        ).catch(err => {
+          console.error("DashboardCrawlerService failed to crawl:", err);
+          return null;
+        });
+
+        if (!crawlResult) {
+          throw new Error("Failed to crawl the dashboard structure");
+        }
+
+        ingestionJobs.set(jobId, {
+          status: 'completed',
+          progress: 100,
+          message: 'Ingestion successful',
+          result: {
+            success: true,
+            pageTitle: crawlResult.pageTitle,
+            capturedAt: new Date().toISOString(),
+            fullPageScreenshotBase64: crawlResult.fullPageScreenshotBase64,
+            captures: crawlResult.captures,
+            tabsDetected: crawlResult.tabsDetected,
+            domTextData: crawlResult.domTextData,
+            svgData: crawlResult.svgData,
+            platformDetected: crawlResult.tabsDetected.length > 0 ? "BI Dashboard with navigation" : "Web Dashboard",
+            knowledgeBase: crawlResult.knowledgeBase,
+            knowledgeBaseStatus: 'success'
+          }
+        });
+      } catch (error: any) {
+        console.error("Async Ingestion Error:", error);
+        ingestionJobs.set(jobId, {
+          status: 'failed',
+          progress: 100,
+          message: 'Ingestion failed',
+          error: error.message || "Unknown error during ingestion"
+        });
+      } finally {
+        if (browser) await browser.close();
       }
+    })();
+  });
 
-      console.log(`[Server] Initiating consolidated semantic crawler for: ${validUrl}`);
-      const crawlerService = new DashboardCrawlerService();
-      const crawlResult = await crawlerService.crawl(
-        validUrl,
-        browser,
-        credentials || null,
-        sessionCookies || null
-      ).catch(err => {
-        console.error("DashboardCrawlerService failed to crawl:", err);
-        return null;
-      });
-
-      if (!crawlResult) {
-        await browser.close();
-        return res.status(500).json({ error: "Failed to crawl the dashboard" });
-      }
-
-      res.json({
-        success: true,
-        pageTitle: crawlResult.pageTitle,
-        capturedAt: new Date().toISOString(),
-        fullPageScreenshotBase64: crawlResult.fullPageScreenshotBase64,
-        captures: crawlResult.captures,
-        tabsDetected: crawlResult.tabsDetected,
-        domTextData: crawlResult.domTextData,
-        svgData: crawlResult.svgData,
-        platformDetected: crawlResult.tabsDetected.length > 0 ? "BI Dashboard with navigation" : "Web Dashboard",
-        knowledgeBase: crawlResult.knowledgeBase,
-        knowledgeBaseStatus: 'success'
-      });
-    } catch (error: any) {
-      console.error("Dashboard Ingestion Error:", error);
-      res.status(500).json({ error: error.message || "Failed to ingest the dashboard URL" });
-    }
+  app.get("/api/ingest-status/:jobId", (req, res) => {
+    const { jobId } = req.params;
+    const job = ingestionJobs.get(jobId);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    res.json(job);
   });
 
   // Ingest Screenshot (Analyst Mode Phase 1)

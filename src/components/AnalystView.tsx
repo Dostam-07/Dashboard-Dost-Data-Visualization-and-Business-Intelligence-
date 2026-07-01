@@ -70,6 +70,8 @@ const sourceLabelMap: Record<string, string> = {
   external_knowledge: "External Knowledge"
 };
 
+import { SuggestionChips } from './SuggestionChips';
+
 const STARTER_QUESTIONS = [
   "Summarize this dashboard",
   "Identify top performers",
@@ -275,19 +277,10 @@ export function AnalystView() {
     setIngestProgressStep(0);
     setIngestCapturedCount(0);
 
-    // Timed progression simulation for premium UX steps
-    const timer1 = setTimeout(() => setIngestProgressStep(1), 2500); // Navigation complete
-    const timer2 = setTimeout(() => setIngestProgressStep(2), 5000); // Structure analyzed
-    const scrollInterval = setInterval(() => {
-      setIngestCapturedCount(prev => Math.min(prev + 1, 4));
-    }, 2000);
-    const timer3 = setTimeout(() => setIngestProgressStep(3), 11000); // Synthesizing coordinates
-    const timer4 = setTimeout(() => setIngestProgressStep(4), 16000); // Synthesizing reports
-
     try {
       const parsedCookies = sessionCookiesJson.trim() ? JSON.parse(sessionCookiesJson.trim()) : null;
 
-      // 1. Ingest URL (Wait for Puppeteer with scroll segments and optional auth injection)
+      // 1. Initial request to start ingestion job
       const ingestRes = await fetch('/api/ingest-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -299,71 +292,93 @@ export function AnalystView() {
       });
       const ingestData = await ingestRes.json();
       
-      clearInterval(scrollInterval);
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      clearTimeout(timer4);
-
       if (!ingestRes.ok) {
-        throw new Error(ingestData.error || "Could not read dashboard URL");
+        throw new Error(ingestData.error || "Could not initiate dashboard ingestion");
       }
 
-      // Check if URL returned Auth modal signal
-      if (ingestData.requiresAuth) {
-        setShowAuthModal(true);
-        setIsUrlIngesting(false);
-        return;
-      }
+      const { jobId } = ingestData;
+      if (!jobId) throw new Error("No job ID returned from server");
 
-      setIngestProgressStep(4);
+      // 2. Poll for status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/ingest-status/${jobId}`);
+          const statusData = await statusRes.json();
 
-      if (ingestData.success && ingestData.fullPageScreenshotBase64) {
-        // 2. Pass screenshot back directly to our existing screenshot visual analysis
-        const analyzeRes = await fetch('/api/ingest-screenshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            imageBase64: ingestData.fullPageScreenshotBase64, 
-            mimeType: 'image/png',
-            captures: ingestData.captures,
-            domTextData: ingestData.domTextData,
-            svgData: ingestData.svgData
-          })
-        });
-        const analyzeData = await analyzeRes.json();
-        
-        if (analyzeData.success) {
-          const newDashboard = {
-            id: Date.now().toString(),
-            url: urlInput,
-            screenshotBase64: ingestData.fullPageScreenshotBase64,
-            structuredReport: analyzeData.report || {},
-            ingestedAt: new Date().toISOString(),
-            qaHistory: [],
-            captures: ingestData.captures,
-            tabsDetected: ingestData.tabsDetected,
-            domTextData: ingestData.domTextData,
-            svgData: ingestData.svgData,
-            knowledgeBase: ingestData.knowledgeBase
-          };
-          await saveIngestedDashboard(newDashboard as any);
-          setIngestedDashboard(newDashboard as any);
-          setChatHistory([]);
-          setActiveAnnotations([]);
-          setActiveSpotlight(null);
-          setLastIntentCorrection(null);
-          setShowAuthModal(false);
-        } else {
-          setIngestError(analyzeData.error || "Failed to analyze extracted dashboard screenshot.");
+          if (statusData.status === 'processing') {
+            if (statusData.progress < 30) setIngestProgressStep(1);
+            else if (statusData.progress < 60) setIngestProgressStep(2);
+            else if (statusData.progress < 90) setIngestProgressStep(3);
+          }
+
+          if (statusData.status === 'completed') {
+            clearInterval(pollInterval);
+            const result = statusData.result;
+
+            if (result.requiresAuth) {
+              setShowAuthModal(true);
+              setIsUrlIngesting(false);
+              return;
+            }
+
+            setIngestProgressStep(4);
+
+            if (result.success && result.fullPageScreenshotBase64) {
+              const analyzeRes = await fetch('/api/ingest-screenshot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  imageBase64: result.fullPageScreenshotBase64, 
+                  mimeType: 'image/png',
+                  captures: result.captures,
+                  domTextData: result.domTextData,
+                  svgData: result.svgData
+                })
+              });
+              const analyzeData = await analyzeRes.json();
+              
+              if (analyzeData.success) {
+                const newDashboard = {
+                  id: Date.now().toString(),
+                  url: urlInput,
+                  screenshotBase64: result.fullPageScreenshotBase64,
+                  structuredReport: analyzeData.report || {},
+                  ingestedAt: new Date().toISOString(),
+                  qaHistory: [],
+                  captures: result.captures,
+                  tabsDetected: result.tabsDetected,
+                  domTextData: result.domTextData,
+                  svgData: result.svgData,
+                  knowledgeBase: result.knowledgeBase
+                };
+                await saveIngestedDashboard(newDashboard as any);
+                setIngestedDashboard(newDashboard as any);
+                setChatHistory([]);
+                setActiveAnnotations([]);
+                setActiveSpotlight(null);
+                setLastIntentCorrection(null);
+                setShowAuthModal(false);
+              } else {
+                setIngestError(analyzeData.error || "Failed to analyze dashboard screenshot.");
+              }
+            }
+            setIsUrlIngesting(false);
+          } else if (statusData.status === 'failed') {
+            clearInterval(pollInterval);
+            setIngestError(statusData.error || "Background ingestion job failed.");
+            setIsUrlIngesting(false);
+          }
+        } catch (pollErr: any) {
+          console.error("Polling error:", pollErr);
+          clearInterval(pollInterval);
+          setIngestError("Connection lost during ingestion.");
+          setIsUrlIngesting(false);
         }
-      } else {
-        setIngestError(ingestData.error || "Failed to fetch screenshot. Please check dashboard URL and access authorization.");
-      }
+      }, 2000);
+
     } catch (err: any) {
       console.error(err);
       setIngestError(err.message || "Network error loading URL");
-    } finally {
       setIsUrlIngesting(false);
     }
   };
@@ -451,7 +466,9 @@ export function AnalystView() {
     const newMsg = { id: Date.now().toString(), role: 'user', content: rawMsg, timestamp: new Date().toISOString() };
     const nextHistory = [...chatHistory, newMsg];
     setChatHistory(nextHistory);
-    setIngestedDashboard({ ...ingestedDashboard, qaHistory: nextHistory });
+    const updatedDashboard = { ...ingestedDashboard, qaHistory: nextHistory };
+    setIngestedDashboard(updatedDashboard);
+    saveIngestedDashboard(updatedDashboard);
     setQaInput('');
     setIsChatResponding(true);
 
@@ -496,7 +513,9 @@ export function AnalystView() {
         };
         const finalHistory = [...nextHistory, responseMsg];
         setChatHistory(finalHistory);
-        setIngestedDashboard({ ...ingestedDashboard, qaHistory: finalHistory });
+        const finalDashboard = { ...ingestedDashboard, qaHistory: finalHistory };
+        setIngestedDashboard(finalDashboard);
+        saveIngestedDashboard(finalDashboard);
         
         if (data.annotationBoxes) {
           setActiveAnnotations(data.annotationBoxes);
@@ -517,7 +536,11 @@ export function AnalystView() {
           content: data.error || 'Failed to analyze question.',
           timestamp: new Date().toISOString()
         };
-        setChatHistory([...nextHistory, errorMsg]);
+        const errorHistory = [...nextHistory, errorMsg];
+        setChatHistory(errorHistory);
+        const errorDashboard = { ...ingestedDashboard, qaHistory: errorHistory };
+        setIngestedDashboard(errorDashboard);
+        saveIngestedDashboard(errorDashboard);
       }
     } catch (err: any) {
       console.error(err);
@@ -527,7 +550,11 @@ export function AnalystView() {
         content: err.message || 'Network error.',
         timestamp: new Date().toISOString()
       };
-      setChatHistory([...nextHistory, errorMsg]);
+      const errorHistory = [...nextHistory, errorMsg];
+      setChatHistory(errorHistory);
+      const errorDashboard = { ...ingestedDashboard, qaHistory: errorHistory };
+      setIngestedDashboard(errorDashboard);
+      saveIngestedDashboard(errorDashboard);
     } finally {
       setIsChatResponding(false);
     }
@@ -991,7 +1018,7 @@ export function AnalystView() {
   }
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-[#0A0A0F] text-white relative">
+    <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-slate-50 dark:bg-[#0A0A0F] text-slate-900 dark:text-white relative">
       {providerError && (
         <div className="absolute top-0 left-0 w-full z-[100] bg-rose-500 text-white text-xs font-bold text-center py-2 px-4 shadow-lg flex items-center justify-center gap-2">
           <AlertTriangle className="w-4 h-4" />
@@ -1000,13 +1027,13 @@ export function AnalystView() {
       )}
 
       {/* Mobile-Friendly Sub-tab Navigation for PWA / Mobile devices */}
-      <div className="lg:hidden flex border-b border-zinc-800/80 bg-[#0c0c14] sticky top-0 z-40 p-2 gap-2 select-none shrink-0 w-full">
+      <div className="lg:hidden flex border-b border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-[#0c0c14] sticky top-0 z-40 p-2 gap-2 select-none shrink-0 w-full">
         <button
           onClick={() => setMobileSubTab('canvas')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-4 rounded-xl text-xs font-black tracking-wide transition-all ${
             mobileSubTab === 'canvas'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-              : 'text-slate-400 bg-slate-900/40 border border-slate-800/40 hover:bg-slate-900/60'
+              : 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/40 hover:bg-slate-200 dark:hover:bg-slate-900/60'
           }`}
         >
           <ImageIcon className="w-4 h-4 shrink-0" />
@@ -1017,11 +1044,11 @@ export function AnalystView() {
           className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-4 rounded-xl text-xs font-black tracking-wide transition-all ${
             mobileSubTab === 'chat'
               ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-              : 'text-slate-400 bg-slate-900/40 border border-slate-800/40 hover:bg-slate-900/60'
+              : 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/40 hover:bg-slate-200 dark:hover:bg-slate-900/60'
           }`}
         >
           <MessageSquare className="w-4 h-4 shrink-0" />
-          <span>💬 COGNITIVE CHAT</span>
+          <span>💬 ANALYST CHAT</span>
         </button>
       </div>
 
@@ -1033,11 +1060,11 @@ export function AnalystView() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="max-w-xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-white"
+              className="max-w-xl w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-slate-900 dark:text-white"
             >
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-bold">Select Dashboard B for side-by-side comparison</h3>
-                <button onClick={() => setShowComparePicker(false)} className="p-1 cursor-pointer"><X className="w-5 h-5" /></button>
+                <button onClick={() => setShowComparePicker(false)} className="p-1 cursor-pointer text-slate-400 hover:text-slate-600 dark:hover:text-white"><X className="w-5 h-5" /></button>
               </div>
 
               <div className="grid grid-cols-2 gap-4 max-h-[350px] overflow-y-auto p-1 custom-scrollbar">
@@ -1045,9 +1072,9 @@ export function AnalystView() {
                   <div 
                     key={snap.id}
                     onClick={() => selectDashboardB(snap.id)}
-                    className="border border-slate-800 hover:border-indigo-500 bg-slate-950 rounded-xl p-3 cursor-pointer transition-all hover:scale-[1.02]"
+                    className="border border-slate-200 dark:border-slate-800 hover:border-indigo-500 bg-slate-50 dark:bg-slate-950 rounded-xl p-3 cursor-pointer transition-all hover:scale-[1.02]"
                   >
-                    <div className="h-20 bg-slate-800 rounded-lg overflow-hidden mb-2">
+                    <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-lg overflow-hidden mb-2">
                       {snap.thumbnailBase64 && (
                         <img src={snap.thumbnailBase64} alt={snap.title} className="w-full h-full object-cover object-top" />
                       )}
@@ -1531,28 +1558,27 @@ export function AnalystView() {
         )}
       </div>
 
-      {/* RIGHT: Chat & Analysis workspace (40% width) */}
-      <div className={`w-full lg:w-2/5 flex-col bg-[#0A0A0F] border-t lg:border-t-0 lg:border-l border-slate-800 ${mobileSubTab === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
+      <div className={`w-full lg:w-2/5 flex flex-col bg-white dark:bg-[#0A0A0F] border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 ${mobileSubTab === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
         
         {/* Top Header toolbar options */}
-        <div className="p-4 border-b border-zinc-900 flex items-center justify-between bg-zinc-950/40">
+        <div className="p-4 border-b border-slate-100 dark:border-zinc-900 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-950/40">
           <div>
-            <h2 className="font-bold text-sm tracking-tight flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400" /> 
+            <h2 className="font-bold text-sm tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <Sparkles className="w-4 h-4 text-indigo-500 dark:text-indigo-400" /> 
               {comparedDashboard ? 'Multimodal Comparative Dialogue' : 'Telemetry Q&A Intelligence'}
             </h2>
-            <p className="text-xs text-slate-400 font-mono mt-0.5 uppercase tracking-widest font-extrabold">Gemini Flash Reasoning</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 uppercase tracking-widest font-extrabold">Gemini Flash Reasoning</p>
           </div>
 
           <div className="flex items-center gap-1.5">
             {/* EN/HI Translation toggles (F9.7) */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 shrink-0">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-0.5 shrink-0">
               {(['en', 'hi', 'hi-en'] as const).map(l => (
                 <button 
                   key={l}
                   onClick={() => setAnswerLanguage(l)}
-                  className={`px-2 py-1 text-xs font-bold uppercase tracking-wider font-mono rounded cursor-pointer ${
-                    answerLanguage === l ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider font-mono rounded cursor-pointer transition-all ${
+                    answerLanguage === l ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   {l === 'hi-en' ? 'Hin' : l}
@@ -1564,7 +1590,7 @@ export function AnalystView() {
             {!comparedDashboard && (
               <button 
                 onClick={() => setShowComparePicker(true)}
-                className="p-2 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 rounded-lg hover:border-indigo-500/30 cursor-pointer text-xs"
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg hover:border-indigo-500/30 cursor-pointer text-xs transition-colors"
                 title="Select dashboard canvas reference to compare..."
               >
                 <Clock className="w-3.5 h-3.5" />
@@ -1575,21 +1601,21 @@ export function AnalystView() {
             <div className="relative">
               <button 
                 onClick={() => setShowExportMenu(!showExportMenu)}
-                className="p-2 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 rounded-lg cursor-pointer flex items-center gap-1"
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer flex items-center gap-1 transition-colors"
                 title="Export report metrics..."
               >
                 <Download className="w-3.5 h-3.5" />
               </button>
 
               {showExportMenu && (
-                <div className="absolute right-0 mt-1.5 w-40 bg-slate-900 border border-slate-800 rounded-xl py-1 shadow-2xl z-[80] text-left">
-                  <button onClick={() => exportReport('json')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer select-none">
+                <div className="absolute right-0 mt-1.5 w-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-1 shadow-2xl z-[80] text-left overflow-hidden">
+                  <button onClick={() => exportReport('json')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-white cursor-pointer select-none transition-colors">
                     <FileText className="w-3.5 h-3.5" /> Export as JSON
                   </button>
-                  <button onClick={() => exportReport('csv')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer select-none">
+                  <button onClick={() => exportReport('csv')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-white cursor-pointer select-none transition-colors">
                     <FileText className="w-3.5 h-3.5" /> Export as CSV
                   </button>
-                  <button onClick={() => exportReport('summary')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer select-none">
+                  <button onClick={() => exportReport('summary')} className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-white cursor-pointer select-none transition-colors">
                     <FileText className="w-3.5 h-3.5" /> Export TXT summary
                   </button>
                 </div>
@@ -1599,7 +1625,7 @@ export function AnalystView() {
         </div>
 
         {/* Chat Message Scroll frame containing Answer Spotlight & Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-950/60 leading-relaxed font-sans mt-0.5">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/60 leading-relaxed font-sans mt-0.5">
           
           {/* Snapshot-Only fallback warning banner */}
           {isScreenshotOnly && (
@@ -1886,15 +1912,10 @@ export function AnalystView() {
                 </p>
                 
                 <div className="flex flex-wrap justify-center gap-2">
-                  {STARTER_QUESTIONS.map((q, idx) => (
-                    <button 
-                      key={idx}
-                      onClick={() => handleAskQuestion(q)}
-                      className="text-[10px] uppercase font-mono tracking-wider font-extrabold bg-[#12121e] border border-zinc-800 hover:bg-indigo-950/20 hover:border-indigo-500/30 text-indigo-400 px-3 py-1.5 rounded-full cursor-pointer transition-all"
-                    >
-                      {q}
-                    </button>
-                  ))}
+                  <SuggestionChips 
+                    suggestions={STARTER_QUESTIONS}
+                    onSelected={(q) => handleAskQuestion(q)}
+                  />
                 </div>
               </div>
             </div>
@@ -1904,18 +1925,18 @@ export function AnalystView() {
         </div>
 
         {/* Input panel with Voice recognition controls */}
-        <div className="p-4 border-t border-zinc-900 bg-zinc-950/40 relative">
+        <div className="p-4 border-t border-slate-100 dark:border-zinc-900 bg-white dark:bg-zinc-950/40 relative">
           
-          <div className="flex items-center gap-2 bg-[#101017] border border-zinc-800 rounded-xl px-3 py-1 text-sm focus-within:border-indigo-500">
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-[#101017] border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-1 text-sm focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
             {/* Speech microphone toggle button (F9.3) */}
             <button 
               onClick={handleVoiceInput}
               className={`p-2 rounded-lg cursor-pointer transition-all ${
-                isChatListening ? 'bg-rose-500 text-white animate-pulse' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                isChatListening ? 'bg-rose-500 text-white animate-pulse' : 'text-slate-400 dark:text-zinc-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
               title="Voice Prompt dictation mode..."
             >
-              {isChatListening ? <Mic className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              <Mic className="w-4 h-4" />
             </button>
 
             <input 
@@ -1924,32 +1945,33 @@ export function AnalystView() {
               onChange={e => setQaInput(e.target.value)} 
               onKeyDown={e => e.key === 'Enter' && handleAskQuestion()}
               placeholder={isChatListening ? "Listening prompt dictation..." : "Ask anything about this dashboard..."}
-              className="flex-1 bg-transparent py-3 mx-1 text-sm text-white focus:outline-none"
+              className="flex-1 bg-transparent py-3 mx-1 text-sm text-slate-900 dark:text-white focus:outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
             />
 
             <button 
               onClick={() => handleAskQuestion()}
-              disabled={!qaInput.trim()}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider px-3.5 py-2 rounded-lg transition-colors cursor-pointer shrink-0"
+              disabled={!qaInput.trim() || isChatResponding}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-bold uppercase tracking-widest px-3.5 py-2 rounded-lg transition-all cursor-pointer shrink-0 shadow-lg shadow-indigo-500/20 active:scale-95"
             >
-              Ask
+              {isChatResponding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Ask'}
             </button>
           </div>
 
           {/* Follow up suggestion chips list */}
-          {chatHistory.length > 0 && !isChatResponding && chatHistory[chatHistory.length - 1].role === 'analyst' && chatHistory[chatHistory.length - 1].suggestedFollowUps?.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5 shrink-0 overflow-x-auto select-none">
-              {chatHistory[chatHistory.length - 1].suggestedFollowUps.map((prompt: string, idx: number) => (
-                <button 
-                  key={idx} 
-                  onClick={() => { handleAskQuestion(prompt); }} 
-                  className="text-xs uppercase font-mono tracking-wider font-extrabold bg-[#12121e] border border-zinc-800 hover:bg-indigo-950/20 hover:border-indigo-500/30 text-indigo-400 px-3 py-1.5 rounded-full cursor-pointer transition-all whitespace-nowrap"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          )}
+          <AnimatePresence>
+            {chatHistory.length > 0 && !isChatResponding && chatHistory[chatHistory.length - 1].role === 'analyst' && chatHistory[chatHistory.length - 1].suggestedFollowUps?.length > 0 && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 select-none"
+              >
+                <SuggestionChips 
+                  suggestions={chatHistory[chatHistory.length - 1].suggestedFollowUps}
+                  onSelected={(prompt) => handleAskQuestion(prompt)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
       </div>

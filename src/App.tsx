@@ -2103,12 +2103,20 @@ export default function App() {
           await pushState(finalPayload);
           setStreamProgressText("");
           
+          const followUps = [
+            `Add a ${finalPayload.components[0]?.type === 'bar_chart' ? 'pie' : 'bar'} chart for more detail`,
+            "Change the primary color theme to emerald",
+            "Add a date range filter",
+            "Identify anomalies in the data"
+          ];
+
           addChatMessage({
             id: assistantMsgId,
             role: 'assistant',
             content: `Interactive dashboard **${finalPayload.title}** generated successfully! Try toggle standard or category dropdown filters inside the toolbox below.`,
             timestamp: new Date().toISOString(),
-            associatedPayload: finalPayload
+            associatedPayload: finalPayload,
+            suggestedFollowUps: followUps
           });
         } else {
           throw new Error("Unable to construct valid dashboard structure. Please try again with different keywords!");
@@ -2170,34 +2178,12 @@ export default function App() {
               <span className="font-extrabold text-lg sm:text-xl tracking-tight text-slate-900 dark:text-white font-sans group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
                 Dash-Dost
               </span>
-              <div className="h-4 w-px bg-slate-200 dark:bg-zinc-900 mx-3.5"></div>
-              <div className="flex bg-slate-100 dark:bg-zinc-900 rounded-lg p-0.5 pointer-events-auto">
-                <button 
-                  onClick={() => setAppMode('build')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                    appMode === 'build' 
-                      ? 'bg-white dark:bg-[#09090b] text-slate-900 dark:text-white shadow-[0_1px_3px_0_rgba(0,0,0,0.1),0_1px_2px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.5),0_1px_2px_-1px_rgba(0,0,0,0.5)]' 
-                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
-                  }`}
-                >
-                  Build
-                </button>
-                <button 
-                  onClick={() => setAppMode('analyze')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                    appMode === 'analyze' 
-                      ? 'bg-white dark:bg-[#09090b] text-slate-900 dark:text-white shadow-[0_1px_3px_0_rgba(0,0,0,0.1),0_1px_2px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.5),0_1px_2px_-1px_rgba(0,0,0,0.5)]' 
-                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
-                  }`}
-                >
-                  Analyze
-                </button>
-              </div>
             </div>
           </div>
 
-          {/* GLOBAL DASHBOARD SEARCH */}
-          <div className="hidden md:flex flex-1 max-w-lg mx-8 relative">
+          {/* GLOBAL DASHBOARD SEARCH HIDDEN */}
+          {false && (
+            <div className="hidden md:flex flex-1 max-w-lg mx-8 relative">
             <div className="relative w-full">
               <Search className="absolute left-4.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 dark:text-zinc-500 pointer-events-none" />
               <input
@@ -2249,31 +2235,37 @@ export default function App() {
               )}
             </div>
           </div>
+        )}
 
           <div className="flex items-center gap-3">
-            {isStreaming && (
-              <div className="flex items-center gap-1.5 bg-green-50 text-green-700 dark:bg-zinc-900 dark:text-green-400 px-3 py-1 rounded-full text-xs font-medium border border-green-100 dark:border-zinc-800/80">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse mr-1"></div>
-                <span>Streaming Ready</span>
-              </div>
-            )}
-
-            {/* Expand / Collapse AI Bot Trigger Button (VD-04) */}
-            {currentPayload && (
-              <button
-                onClick={handleToggleChatPanel}
-                className={`p-2 rounded-lg border transition-all cursor-pointer inline-flex items-center justify-center h-9 w-9 relative ${
-                  !isChatPanelCollapsed
-                    ? 'bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700 shadow-sm shadow-indigo-100 dark:shadow-none'
-                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500 hover:text-slate-800 dark:border-zinc-800 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-                }`}
-                title={!isChatPanelCollapsed ? 'Collapse AI Assistant' : 'Expand AI Assistant'}
-              >
-                <Bot className="h-4.5 w-4.5" />
+            {/* BUILD ACTIONS HIDDEN */}
+            {false && (
+              <>
                 {isStreaming && (
-                  <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                  <div className="flex items-center gap-1.5 bg-green-50 text-green-700 dark:bg-zinc-900 dark:text-green-400 px-3 py-1 rounded-full text-xs font-medium border border-green-100 dark:border-zinc-800/80">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse mr-1"></div>
+                    <span>Streaming Ready</span>
+                  </div>
                 )}
-              </button>
+
+                {/* Expand / Collapse AI Bot Trigger Button (VD-04) */}
+                {currentPayload && (
+                  <button
+                    onClick={handleToggleChatPanel}
+                    className={`p-2 rounded-lg border transition-all cursor-pointer inline-flex items-center justify-center h-9 w-9 relative ${
+                      !isChatPanelCollapsed
+                        ? 'bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700 shadow-sm shadow-indigo-100 dark:shadow-none'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-500 hover:text-slate-800 dark:border-zinc-800 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                    title={!isChatPanelCollapsed ? 'Collapse AI Assistant' : 'Expand AI Assistant'}
+                  >
+                    <Bot className="h-4.5 w-4.5" />
+                    {isStreaming && (
+                      <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                    )}
+                  </button>
+                )}
+              </>
             )}
             
             {/* Theme switcher toggle */}
@@ -2308,9 +2300,8 @@ export default function App() {
         </div>
       )}
 
-      {appMode === 'analyze' ? (
-        <AnalystView />
-      ) : (
+      <AnalystView />
+      {false && (
         <>
           {/* CORE WORKSPACE GRID */}
           <div className="flex-1 w-full grid grid-cols-1 lg:grid-cols-12 min-h-0 relative">

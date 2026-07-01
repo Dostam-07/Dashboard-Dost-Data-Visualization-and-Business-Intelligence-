@@ -134,7 +134,7 @@ ${tablesSample}
 Extract all elements accurately into JSON. Do not hallucinate metrics. Use actual numbers and text found above.`;
 
       const response = await this.ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-1.5-flash',
         contents: prompt,
         config: {
           systemInstruction,
